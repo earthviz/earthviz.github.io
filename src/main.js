@@ -1139,7 +1139,36 @@ function pan(dx, dy) {
 
 const canvas = renderer.domElement;
 let drag = null;
+const touchPoints = new Map();
+let touchGesture = null;
+const touchDistance = (points) => Math.hypot(points[1].clientX - points[0].clientX, points[1].clientY - points[0].clientY);
+const touchAngle = (points) => Math.atan2(points[1].clientY - points[0].clientY, points[1].clientX - points[0].clientX);
+const touchMidpoint = (points) => ({
+  x: (points[0].clientX + points[1].clientX) / 2,
+  y: (points[0].clientY + points[1].clientY) / 2,
+});
+const angleDelta = (current, previous) => Math.atan2(Math.sin(current - previous), Math.cos(current - previous));
+
 canvas.addEventListener('pointerdown', (event) => {
+  if (event.pointerType === 'touch') {
+    touchPoints.set(event.pointerId, event);
+    if (touchPoints.size === 2) {
+      const points = [...touchPoints.values()];
+      touchGesture = { distance: touchDistance(points), angle: touchAngle(points), midpoint: touchMidpoint(points) };
+      drag = null;
+    } else {
+      drag = {
+        x: event.clientX,
+        y: event.clientY,
+        startX: event.clientX,
+        startY: event.clientY,
+        rotate: false,
+      };
+    }
+    canvas.setPointerCapture(event.pointerId);
+    cancelFlight();
+    return;
+  }
   drag = {
     x: event.clientX,
     y: event.clientY,
@@ -1151,6 +1180,33 @@ canvas.addEventListener('pointerdown', (event) => {
   cancelFlight();
 });
 canvas.addEventListener('pointermove', (event) => {
+  if (event.pointerType === 'touch') {
+    if (!touchPoints.has(event.pointerId)) return;
+    touchPoints.set(event.pointerId, event);
+    if (touchPoints.size === 2) {
+      const points = [...touchPoints.values()];
+      const distance = touchDistance(points);
+      const angle = touchAngle(points);
+      const midpoint = touchMidpoint(points);
+      if (touchGesture) {
+        if (mode === 'stargaze') {
+          skyView.fov = clamp(skyView.fov * touchGesture.distance / Math.max(distance, 1), 18, 90);
+          skyView.azimuth = wrapLongitude(skyView.azimuth + angleDelta(angle, touchGesture.angle));
+          skyView.altitude = clamp(skyView.altitude + (midpoint.y - touchGesture.midpoint.y) * 0.004, -12 * D2R, 88 * D2R);
+        } else {
+          view.range = clamp(view.range * touchGesture.distance / Math.max(distance, 1), 0.6, 30000);
+          pan(touchGesture.midpoint.x - midpoint.x, touchGesture.midpoint.y - midpoint.y);
+          view.heading += angleDelta(angle, touchGesture.angle);
+        }
+      }
+      touchGesture = { distance, angle, midpoint };
+      return;
+    }
+    if (touchPoints.size !== 1) return;
+    if (!drag) {
+      drag = { x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, rotate: false };
+    }
+  }
   if (!drag) return;
   const dx = event.clientX - drag.x;
   const dy = event.clientY - drag.y;
@@ -1167,13 +1223,35 @@ canvas.addEventListener('pointermove', (event) => {
   }
 });
 canvas.addEventListener('pointerup', (event) => {
+  if (event.pointerType === 'touch') {
+    touchPoints.delete(event.pointerId);
+    if (mode === 'stargaze' && drag && touchPoints.size === 0 && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) {
+      pickStar(event.clientX, event.clientY);
+    }
+    if (touchPoints.size < 2) touchGesture = null;
+    if (touchPoints.size === 1) {
+      const remaining = [...touchPoints.values()][0];
+      drag = { x: remaining.clientX, y: remaining.clientY, startX: remaining.clientX, startY: remaining.clientY, rotate: false };
+    } else {
+      drag = null;
+    }
+    return;
+  }
   if (mode === 'stargaze' && drag && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) {
     pickStar(event.clientX, event.clientY);
   }
   drag = null;
 });
-canvas.addEventListener('pointercancel', () => { drag = null; });
-canvas.addEventListener('lostpointercapture', () => { drag = null; });
+canvas.addEventListener('pointercancel', (event) => {
+  if (event.pointerType === 'touch') touchPoints.delete(event.pointerId);
+  drag = null;
+  touchGesture = null;
+});
+canvas.addEventListener('lostpointercapture', (event) => {
+  if (event.pointerType === 'touch') touchPoints.delete(event.pointerId);
+  drag = null;
+  touchGesture = null;
+});
 canvas.addEventListener('contextmenu', (event) => event.preventDefault());
 canvas.addEventListener('wheel', (event) => {
   event.preventDefault();
