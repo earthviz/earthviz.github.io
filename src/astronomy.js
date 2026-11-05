@@ -49,6 +49,34 @@ export function precessJ2000(ra, dec, date) {
   return { ra: wrapRadians(Math.atan2(a, b) + z), dec: Math.asin(clamp(c, -1, 1)) };
 }
 
+// Row-major 3x3 matrix taking J2000 equatorial unit vectors (X toward RA 0,
+// Z toward the pole) to the equinox of `date`. Same IAU 1976 angles as
+// precessJ2000, so catalog stars and the Milky Way dome stay consistent.
+export function precessionMatrix(date) {
+  const centuries = (julianDate(date) - J2000) / 36525;
+  const t2 = centuries * centuries;
+  const t3 = t2 * centuries;
+  const zeta = (2306.2181 * centuries + 0.30188 * t2 + 0.017998 * t3) * ARCSEC_TO_RAD;
+  const z = (2306.2181 * centuries + 1.09468 * t2 + 0.018203 * t3) * ARCSEC_TO_RAD;
+  const theta = (2004.3109 * centuries - 0.42665 * t2 - 0.041833 * t3) * ARCSEC_TO_RAD;
+  const cz = Math.cos(zeta), sz = Math.sin(zeta);
+  const cZ = Math.cos(z), sZ = Math.sin(z);
+  const ct = Math.cos(theta), st = Math.sin(theta);
+  // P = Rz(z) * Ry'(theta) * Rz(zeta)
+  return [
+    cZ * ct * cz - sZ * sz, -cZ * ct * sz - sZ * cz, -cZ * st,
+    sZ * ct * cz + cZ * sz, -sZ * ct * sz + cZ * cz, -sZ * st,
+    st * cz, -st * sz, ct,
+  ];
+}
+
+// J2000 equatorial -> galactic (Hipparcos/ESA 1997 definition), row-major.
+export const EQUATORIAL_TO_GALACTIC = [
+  -0.0548755604162154, -0.8734370902348850, -0.4838350155487132,
+  0.4941094278755837, -0.4448296299600112, 0.7469822444972189,
+  -0.8676661490190047, -0.1980763734312015, 0.4559837761750669,
+];
+
 export function catalogEquatorial(star, date) {
   let ra = parseRightAscension(star.RA);
   let dec = parseDeclination(star.Dec);

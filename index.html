@@ -85,6 +85,9 @@
           <label class="switch-row" for="cyc">Animate day & night<input id="cyc" type="checkbox" role="switch"></label>
           <label class="switch-row explore-daylight" for="daylight">Keep terrain in daylight<input id="daylight" type="checkbox" role="switch"></label>
           <p class="panel-note explore-daylight">Explore with clear daylight while preserving the selected astronomical time.</p>
+          <div class="field-label"><label for="mw">Milky Way</label><output id="mw-value" for="mw">100%</output></div>
+          <input id="mw" type="range" min="0" max="1" step="0.01" value="1" aria-label="Milky Way image opacity">
+          <div class="range-labels"><span>Stars only</span><span>Milky Way</span></div>
           <p class="panel-note">Watch daylight travel across the globe.</p>
         </div>
       </details>

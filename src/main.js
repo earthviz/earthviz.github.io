@@ -11,6 +11,8 @@ import {
   moonEquatorial,
   starRgb,
   sunEquatorial,
+  EQUATORIAL_TO_GALACTIC,
+  precessionMatrix,
 } from './astronomy.js';
 import {
   daylightState,
@@ -46,6 +48,7 @@ const MAX_QUEUE = LIMITS.queued;
 const MAX_CONCURRENT_LOADS = LIMITS.concurrent;
 const TILE_REQUEST_TIMEOUT = 12000;
 const BSC5_URL = new URL('../bsc5.json', import.meta.url);
+const MILKY_WAY_URL = new URL('../milky_way.jpg', import.meta.url);
 const $ = (id) => document.getElementById(id);
 const clamp = THREE.MathUtils.clamp;
 let mode = 'explore';
@@ -192,6 +195,119 @@ const stars = new THREE.Points(
 stars.frustumCulled = false;
 stars.renderOrder = -1;
 scene.add(stars);
+
+/* ---------- Milky Way (ESO/S. Brunier panorama) ----------
+ * One unit sphere, drawn once, sampled per fragment in galactic coordinates.
+ * The panorama is a full-sky equirectangular map with the galactic centre at
+ * the image centre and longitude increasing to the left, so it must not be
+ * wrapped around the sphere by UV. Instead each pixel's direction is rotated
+ * star-frame -> J2000 equatorial (undo precession) -> galactic and looked up
+ * once. That gives exactly one copy of the sky, locked to the catalog stars.
+ */
+const galacticU = { value: new THREE.Matrix3() };
+const milkyWayU = { value: null };
+const milkyWay = new THREE.Mesh(
+  new THREE.SphereGeometry(1, 32, 16),
+  new THREE.ShaderMaterial({
+    uniforms: { uMap: milkyWayU, uGalactic: galacticU, uVis: visU, uReady: { value: 0 }, uOpacity: { value: 1 } },
+    side: THREE.BackSide,
+    transparent: true,
+    depthWrite: false,
+    fog: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: `
+      varying vec3 vDir;
+      void main() {
+        vDir = position;
+        vec4 p = projectionMatrix * vec4(mat3(modelViewMatrix) * position, 1.0);
+        gl_Position = p.xyww;
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D uMap;
+      uniform mat3 uGalactic;
+      uniform float uVis;
+      uniform float uReady;
+      uniform float uOpacity;
+      varying vec3 vDir;
+      const float PI = 3.14159265358979;
+      void main() {
+        vec3 g = normalize(uGalactic * normalize(vDir));
+        float u = 0.5 - atan(g.y, g.x) / (2.0 * PI);
+        float v = 0.5 + asin(clamp(g.z, -1.0, 1.0)) / PI;
+        // atan() jumps at l = +-180 deg, which would make the mip selector pick
+        // the smallest mip along a seam. Use the derivative of whichever wrap
+        // of u is continuous at this pixel.
+        float u2 = fract(u + 0.5) - 0.5;
+        vec2 dx = abs(dFdx(u)) < abs(dFdx(u2)) ? vec2(dFdx(u), dFdx(v)) : vec2(dFdx(u2), dFdx(v));
+        vec2 dy = abs(dFdy(u)) < abs(dFdy(u2)) ? vec2(dFdy(u), dFdy(v)) : vec2(dFdy(u2), dFdy(v));
+        vec3 c = textureGrad(uMap, vec2(u, v), dx, dy).rgb;
+        gl_FragColor = vec4(c * uVis * uReady * uOpacity, 1.0);
+      }
+    `,
+  }),
+);
+milkyWay.frustumCulled = false;
+milkyWay.renderOrder = -2;
+scene.add(milkyWay);
+
+// Opacity slider: 0 = catalog stars only, 1 = panorama + catalog stars.
+const milkyWayOpacity = $('mw');
+function applyMilkyWayOpacity() {
+  const value = clamp(Number.parseFloat(milkyWayOpacity.value) || 0, 0, 1);
+  milkyWay.material.uniforms.uOpacity.value = value;
+  milkyWay.visible = value > 0; // skip the full-sky pass entirely at 0
+  $('mw-value').textContent = `${Math.round(value * 100)}%`;
+}
+milkyWayOpacity.addEventListener('input', applyMilkyWayOpacity);
+applyMilkyWayOpacity();
+
+// Matrix applied in the shader: star-frame vector -> galactic vector.
+// Star frame (see updateStarEpoch): x = cos(dec)cos(ra), y = sin(dec), z = -cos(dec)sin(ra),
+// i.e. equatorial (X, Y, Z) = (x, -z, y).
+const galacticScratch = {
+  starToEquatorial: new THREE.Matrix3().set(1, 0, 0, 0, 0, -1, 0, 1, 0),
+  precession: new THREE.Matrix3(),
+  toGalactic: new THREE.Matrix3().set(...EQUATORIAL_TO_GALACTIC),
+};
+function updateMilkyWay(date) {
+  // The stars are drawn at their equinox-of-date positions; the panorama is in
+  // J2000, so undo precession (transpose of an orthonormal matrix = inverse).
+  galacticScratch.precession.set(...precessionMatrix(date)).transpose();
+  galacticU.value
+    .copy(galacticScratch.toGalactic)
+    .multiply(galacticScratch.precession)
+    .multiply(galacticScratch.starToEquatorial);
+}
+
+function loadMilkyWay() {
+  new THREE.TextureLoader().load(MILKY_WAY_URL.href, (texture) => {
+    let map = texture;
+    const limit = renderer.capabilities.maxTextureSize;
+    const image = texture.image;
+    if (image.width > limit) {
+      // Small GPUs (many phones cap at 4096): downscale once instead of failing.
+      const canvas = document.createElement('canvas');
+      canvas.width = limit;
+      canvas.height = Math.round(limit * image.height / image.width);
+      canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+      texture.dispose();
+      map = new THREE.CanvasTexture(canvas);
+    }
+    // Values are already display-encoded; the star shaders also write straight
+    // to the framebuffer, so keep the texture unconverted.
+    map.colorSpace = THREE.NoColorSpace;
+    map.wrapS = THREE.RepeatWrapping;
+    map.wrapT = THREE.ClampToEdgeWrapping;
+    map.generateMipmaps = true;
+    map.minFilter = THREE.LinearMipmapLinearFilter;
+    map.magFilter = THREE.LinearFilter;
+    map.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+    map.needsUpdate = true;
+    milkyWayU.value = map;
+    milkyWay.material.uniforms.uReady.value = 1;
+  }, undefined, (error) => console.error('Could not load milky_way.jpg:', error));
+}
 
 const celestialGeometry = new THREE.SphereGeometry(1, 48, 32);
 const sunBody = new THREE.Mesh(
@@ -1311,6 +1427,9 @@ function updateSun() {
   sunL.position.copy(sunDirection).multiplyScalar(10);
   stars.rotation.y = -sidereal;
   stars.updateMatrixWorld();
+  milkyWay.rotation.y = -sidereal;
+  milkyWay.updateMatrixWorld();
+  updateMilkyWay(date);
   updateStarEpoch(date);
   updateSelectedStar();
   renderDailyEvents();
@@ -1407,7 +1526,7 @@ const setCredit = () => {
   const key = sourceKey();
   const provider = key === 'gibs' ? 'NASA GIBS' : (key === 'eox' ? 'EOX' : 'Esri');
   $('credit-label').textContent = `© ${provider} · Mapzen · OSM ↗`;
-  $('credit').innerHTML = `Heights: Mapzen Terrarium (AWS) · ${IMAGE_SOURCES[key].credit} · Sun/Moon events: <a href="https://aa.usno.navy.mil/data/api" target="_blank" rel="noopener">USNO Astronomical Applications</a> · Stars: Yale Bright Star Catalogue (BSC5) · Search: © OpenStreetMap contributors`;
+  $('credit').innerHTML = `Heights: Mapzen Terrarium (AWS) · ${IMAGE_SOURCES[key].credit} · Sun/Moon events: <a href="https://aa.usno.navy.mil/data/api" target="_blank" rel="noopener">USNO Astronomical Applications</a> · Stars: Yale Bright Star Catalogue (BSC5) · Milky Way: ESO/S. Brunier · Search: © OpenStreetMap contributors`;
 };
 
 function refreshImagery() {
@@ -1596,6 +1715,7 @@ setObservationControls(new Date());
 updateSun();
 scheduleDailyEvents(true);
 loadStarCatalog();
+loadMilkyWay();
 $('place').textContent = 'A world to discover';
 const clock = new THREE.Clock();
 if (import.meta.env.DEV && new URLSearchParams(location.search).has('debug')) {
