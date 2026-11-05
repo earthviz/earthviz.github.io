@@ -9,9 +9,7 @@ import {
   gibsAncestor,
   gibsTileUrl,
   hlsTileUrl,
-  isGibsNoData,
   isoToDay,
-  nearestGibsDate,
   previousUtcDate,
 } from '../src/spacetime.js';
 
@@ -47,20 +45,6 @@ test('HLS tiles use NASA Level 12 Landsat and Sentinel routes', () => {
   );
 });
 
-test('coverage gaps use the nearest available date', () => {
-  assert.equal(nearestGibsDate('2024-06-15'), '2024-06-14');
-  assert.equal(nearestGibsDate(GIBS_START_DATE), '2000-02-25');
-});
-
-test('GIBS no-data detection preserves legitimate dark imagery', () => {
-  assert.equal(isGibsNoData(0, 0, 0), true);
-  assert.equal(isGibsNoData(8, 10, 9), true);
-  assert.equal(isGibsNoData(20, 20, 20), false);
-  assert.equal(isGibsNoData(4, 8, 15), false);
-  assert.equal(isGibsNoData(30, 30, 30), false);
-  assert.equal(isGibsNoData(120, 80, 40, 0), true);
-});
-
 test('deep terrain tiles reuse the matching maximum-resolution GIBS ancestor', () => {
   assert.deepEqual(gibsAncestor(9, 301, 205), {
     z: 9, x: 301, y: 205, scale: 1, childX: 0, childY: 0,
@@ -73,3 +57,8 @@ test('deep terrain tiles reuse the matching maximum-resolution GIBS ancestor', (
   });
 });
 
+test('daily tile URLs are pinned to the requested date only', () => {
+  const url = gibsTileUrl('2024-06-15', 3, 2, 1);
+  assert.ok(url.includes('/2024-06-15/'));
+  assert.ok(!url.includes('2024-06-14') && !url.includes('2024-06-16'));
+});

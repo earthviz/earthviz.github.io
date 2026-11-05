@@ -32,9 +32,7 @@ import {
   gibsAncestor,
   gibsTileUrl,
   hlsTileUrl,
-  isGibsNoData,
   isoToDay,
-  nearestGibsDate,
   previousUtcDate,
 } from './spacetime.js';
 
@@ -654,49 +652,6 @@ function replaceTileTexture(tile, image) {
   oldTexture?.dispose();
 }
 
-function imagePixels(image) {
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = T;
-  const context = canvas.getContext('2d', { willReadFrequently: true });
-  context.drawImage(image, 0, 0, T, T);
-  return { canvas, context, pixels: context.getImageData(0, 0, T, T) };
-}
-
-function hasGibsNoData(image) {
-  try {
-    const pixels = imagePixels(image).pixels.data;
-    for (let i = 0; i < pixels.length; i += 4) {
-      if (isGibsNoData(pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3])) return true;
-    }
-  } catch (error) {
-    console.warn('Could not inspect GIBS coverage:', error);
-  }
-  return false;
-}
-
-function fillGibsGaps(primary, nearest) {
-  try {
-    const output = imagePixels(primary);
-    const adjacent = nearest ? imagePixels(nearest).pixels.data : null;
-    const pixels = output.pixels.data;
-    for (let i = 0; i < pixels.length; i += 4) {
-      const primaryMissing = isGibsNoData(pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]);
-      const adjacentAvailable = adjacent
-        && !isGibsNoData(adjacent[i], adjacent[i + 1], adjacent[i + 2], adjacent[i + 3]);
-      if (!primaryMissing || !adjacentAvailable) continue;
-      pixels[i] = adjacent[i];
-      pixels[i + 1] = adjacent[i + 1];
-      pixels[i + 2] = adjacent[i + 2];
-      pixels[i + 3] = adjacent[i + 3];
-    }
-    output.context.putImageData(output.pixels, 0, 0);
-    return output.canvas;
-  } catch (error) {
-    console.warn('Could not compose Spacetime imagery:', error);
-    return primary;
-  }
-}
-
 function composeHlsImagery(landsat, sentinel) {
   if (!landsat && !sentinel) return blackTile;
   const canvas = document.createElement('canvas');
@@ -754,16 +709,10 @@ async function loadTileImagery(tile, requestedSource, signal) {
   }
 
   if (tile.z <= GIBS_NATIVE_MAX_ZOOM) {
-    const currentUrl = gibsTileUrl(spacetimeDate, tile.z, tile.x, tile.y);
-    const nearestUrl = gibsTileUrl(nearestGibsDate(spacetimeDate), tile.z, tile.x, tile.y);
-    const primary = await cachedGibsImage(currentUrl);
-    if (!primary) return (await cachedGibsImage(nearestUrl)) || blackTile;
-    if (!hasGibsNoData(primary)) return primary;
-
-    // MODIS JPEGs encode empty orbital swaths as black. Fill only those pixels
-    // from the adjacent day; anything still absent remains black.
-    const nearest = await cachedGibsImage(nearestUrl);
-    return fillGibsGaps(primary, nearest);
+    // Only the selected day's acquisition is shown. Empty orbital swaths stay
+    // black; no neighbouring date is ever blended in.
+    const url = gibsTileUrl(spacetimeDate, tile.z, tile.x, tile.y);
+    return (await cachedGibsImage(url)) || blackTile;
   }
 
   // Local views use NASA's 30 m HLS Landsat/Sentinel reflectance products.

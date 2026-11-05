@@ -69,26 +69,34 @@
       <details class="tool-panel" id="light-panel">
         <summary><span class="tool-icon" aria-hidden="true">☼</span> Lighting <span class="chevron" aria-hidden="true">⌄</span></summary>
         <div class="panel-content">
-          <div class="eyebrow">FOLLOW THE LIGHT</div>
-          <div class="field-label observation-date"><label for="sky-date">Observing date · UTC</label><button id="sky-now" type="button">Now</button></div>
-          <input id="sky-date" type="date">
-          <label id="tl" for="tod">Sun 08:00 UTC</label>
-          <input id="tod" type="range" min="0" max="24" step="0.05" value="8">
-          <div class="range-labels"><span>00:00</span><span>12:00</span><span>24:00</span></div>
-          <div id="sun-flow" class="sun-flow" aria-live="polite">
-            <div class="sun-flow-head"><strong id="sun-state">Loading Sun and Moon…</strong><span id="sun-next"></span></div>
-            <div id="sun-track" class="sun-track" role="img" aria-label="Daily sunlight timeline"><i class="sun-now" aria-hidden="true"></i></div>
-            <div class="sun-events"><button id="jump-sunrise" type="button">↑ <span>Sunrise —</span></button><button id="jump-sunset" type="button">↓ <span>Sunset —</span></button></div>
-            <div id="moon-events" class="moon-events">Moon data loading…</div>
-            <small id="sun-source"></small>
-          </div>
-          <label class="switch-row" for="cyc">Animate day & night<input id="cyc" type="checkbox" role="switch"></label>
-          <label class="switch-row explore-daylight" for="daylight">Keep terrain in daylight<input id="daylight" type="checkbox" role="switch"></label>
-          <p class="panel-note explore-daylight">Explore with clear daylight while preserving the selected astronomical time.</p>
-          <div class="field-label"><label for="mw">Milky Way</label><output id="mw-value" for="mw">100%</output></div>
-          <input id="mw" type="range" min="0" max="1" step="0.01" value="1" aria-label="Milky Way image opacity">
-          <div class="range-labels"><span>Stars only</span><span>Milky Way</span></div>
-          <p class="panel-note">Watch daylight travel across the globe.</p>
+          <section class="lighting-section">
+            <div class="section-label">SUN POSITION</div>
+            <div class="field-label observation-date"><label for="sky-date">Date · UTC</label><button id="sky-now" type="button">Today</button></div>
+            <input id="sky-date" type="date">
+            <label id="tl" for="tod">Sun 08:00 UTC</label>
+            <input id="tod" type="range" min="0" max="24" step="0.05" value="8">
+            <div class="range-labels"><span>00:00</span><span>12:00</span><span>24:00</span></div>
+            <div id="sun-flow" class="sun-flow" aria-live="polite">
+              <div class="sun-flow-head"><strong id="sun-state">Loading Sun and Moon…</strong><span id="sun-next"></span></div>
+              <div id="sun-track" class="sun-track" role="img" aria-label="Daily sunlight timeline"><i class="sun-now" aria-hidden="true"></i></div>
+              <div class="sun-events"><button id="jump-sunrise" type="button">↑ <span>Sunrise —</span></button><button id="jump-sunset" type="button">↓ <span>Sunset —</span></button></div>
+              <div id="moon-events" class="moon-events">Moon data loading…</div>
+              <small id="sun-source"></small>
+            </div>
+          </section>
+          <section class="lighting-section">
+            <div class="section-label">DAYLIGHT BEHAVIOR</div>
+            <label class="switch-row" for="cyc">Animate day & night<input id="cyc" type="checkbox" role="switch"></label>
+            <label class="switch-row explore-daylight" for="daylight">Keep terrain in daylight<input id="daylight" type="checkbox" role="switch"></label>
+            <p class="panel-note explore-daylight">Keeps terrain visible in daylight while the selected time remains unchanged.</p>
+          </section>
+          <section class="lighting-section">
+            <div class="section-label">NIGHT SKY</div>
+            <div class="field-label"><label for="mw">Milky Way</label><output id="mw-value" for="mw">100%</output></div>
+            <input id="mw" type="range" min="0" max="1" step="0.01" value="1" aria-label="Milky Way image opacity">
+            <div class="range-labels"><span>Stars only</span><span>Milky Way</span></div>
+            <p class="panel-note">Adjust the background sky without changing terrain lighting.</p>
+          </section>
         </div>
       </details>
     </aside>
@@ -105,11 +113,11 @@
       <button id="north" class="compass" type="button" aria-label="Face north" title="Face north"><span>N</span><span id="compass-needle" aria-hidden="true">▲</span></button>
       <div class="nav-stack"><button id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">+</button><button id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button></div>
       <button id="home" type="button" aria-label="Return to globe view" title="Return to globe view">◎</button>
+      <button id="ui-toggle" class="ui-toggle" type="button" aria-pressed="false" title="Focus on the world">Focus</button>
     </nav>
 
     <footer class="footer">
       <details class="help"><summary>ⓘ <span>How to explore</span></summary><div>Drag to move · Scroll to zoom<br>Right-drag or Shift-drag to orbit<br>In Stargaze, drag to look and click a star to identify it<br>Arrow keys to move/look · + / − to zoom</div></details>
-      <span class="footer-tagline">Stay curious. Keep exploring.</span>
       <details class="credits"><summary id="credit-label">Map data & credits ↗</summary><div id="credit"></div></details>
     </footer>
     <script type="module" src="/src/main.js"></script>

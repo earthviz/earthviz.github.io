@@ -22,21 +22,6 @@ export function previousUtcDate(now = new Date()) {
   return dayToIso(Math.floor(now.getTime() / DAY_MS) - 1);
 }
 
-export function nearestGibsDate(date) {
-  const day = isoToDay(date);
-  const firstDay = isoToDay(GIBS_START_DATE);
-  return dayToIso(day > firstDay ? day - 1 : day + 1);
-}
-
-export function isGibsNoData(red, green, blue, alpha = 255) {
-  // This JPEG layer encodes empty orbital swaths as neutral, near-black pixels.
-  // A brightness threshold alone also catches real water and terrain shadows,
-  // producing the patchwork effect that we explicitly want to avoid.
-  const darkest = Math.min(red, green, blue);
-  const brightest = Math.max(red, green, blue);
-  return alpha < 8 || (brightest <= 12 && brightest - darkest <= 3);
-}
-
 export function gibsAncestor(z, x, y, maxZoom = GIBS_NATIVE_MAX_ZOOM) {
   const ancestorZ = Math.min(z, maxZoom);
   const scale = 2 ** (z - ancestorZ);

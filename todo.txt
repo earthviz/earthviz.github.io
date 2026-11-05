@@ -1,6 +1,5 @@
-- remove the next/previous day tiles from the live satellite info panel.
 - add point light sources for sun and moon
 - add planet and cloud data from NASA GIBS and the same source for sun data
 - add genuine sunrise and sunset atmospherics
-- make stargazing general from any point.
+- make stargazing general from any point. (ie point mappings and stuff)
 - fix reykjavik explosions

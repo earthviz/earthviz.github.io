@@ -60,10 +60,9 @@ MODIS Terra record. Choose and explicitly load one date at a time; there is no
 automatic playback. Native-resolution MODIS is used for global and regional
 views. Local views switch to NASA's 30 m HLS Landsat-8/9 and Sentinel-2
 reflectance layers through zoom 12; deeper terrain tiles crop their matching
-maximum-resolution HLS parent. Only neutral near-black MODIS pixels from genuine
-orbital coverage gaps use the nearest preceding date. Transparent HLS coverage
-and pixels unavailable on both dates remain black. Explore imagery is never
-placed underneath, while dark water and terrain shadows are left intact.
+maximum-resolution HLS parent. Only imagery acquired on the selected date is
+shown, at every scale: empty MODIS orbital swaths and transparent HLS coverage
+remain black, and neighbouring dates and Explore imagery are never blended in.
 Changing dates does not discard elevation samples or rebuild terrain geometry;
 terrain refinement remains identical to Explore.
 
