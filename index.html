@@ -11,7 +11,11 @@
   <body>
     <header class="topbar">
       <div class="brand"><span class="brand-mark" aria-hidden="true">◎</span> earthviz <span class="brand-caption">A different perspective.</span></div>
-      <span class="edition">THE EARTH, AT YOUR PACE</span>
+      <div class="mode-switch" role="group" aria-label="Viewing mode">
+        <button id="mode-explore" class="mode-button active" type="button" aria-pressed="true">Explore</button>
+        <button id="mode-spacetime" class="mode-button" type="button" aria-pressed="false"><span aria-hidden="true">◷</span> Spacetime</button>
+        <button id="mode-stargaze" class="mode-button" type="button" aria-pressed="false"><span aria-hidden="true">✦</span> Stargaze</button>
+      </div>
       <div class="search-shell">
         <form id="sf" role="search" autocomplete="off">
           <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
@@ -33,8 +37,8 @@
         <summary><span class="tool-icon" aria-hidden="true">▱</span> Map & terrain <span class="chevron" aria-hidden="true">⌄</span></summary>
         <div class="panel-content">
           <div class="eyebrow">YOUR PERSPECTIVE</div>
-          <label for="src">Satellite imagery</label>
-          <select id="src"><option value="eox">Sentinel-2 · Natural color</option><option value="esri">Esri · World Imagery</option></select>
+          <div class="explore-imagery"><label for="src">Satellite imagery</label>
+          <select id="src"><option value="eox">Sentinel-2 · Natural color</option><option value="esri">Esri · World Imagery</option></select></div>
           <div class="field-label"><label for="det">Terrain detail</label><output id="detail-value" for="det">Balanced</output></div>
           <input id="det" type="range" min="1" max="6" step="1" value="4">
           <div class="range-labels"><span>Lighter</span><span>Sharper</span></div>
@@ -46,24 +50,51 @@
       </details>
     </aside>
 
+    <section id="spacetime" class="spacetime" aria-label="Spacetime date" hidden>
+      <div class="spacetime-head">
+        <div>
+          <div class="eyebrow">NASA GIBS · MODIS + HLS</div>
+          <strong id="spacetime-label">Earth through time</strong>
+        </div>
+        <form id="spacetime-form" class="date-jump">
+          <label for="spacetime-date">Choose a date</label>
+          <input id="spacetime-date" type="date">
+          <button id="spacetime-load" type="submit">View date</button>
+        </form>
+      </div>
+      <p class="panel-note">MODIS globally, 30 m HLS Landsat/Sentinel up close. Unavailable NASA pixels remain black.</p>
+    </section>
+
     <aside class="map-tools right-tools" aria-label="Lighting">
       <details class="tool-panel" id="light-panel">
         <summary><span class="tool-icon" aria-hidden="true">☼</span> Lighting <span class="chevron" aria-hidden="true">⌄</span></summary>
         <div class="panel-content">
           <div class="eyebrow">FOLLOW THE LIGHT</div>
+          <div class="field-label observation-date"><label for="sky-date">Observing date · UTC</label><button id="sky-now" type="button">Now</button></div>
+          <input id="sky-date" type="date">
           <label id="tl" for="tod">Sun 08:00 UTC</label>
           <input id="tod" type="range" min="0" max="24" step="0.05" value="8">
           <div class="range-labels"><span>00:00</span><span>12:00</span><span>24:00</span></div>
+          <div id="sun-flow" class="sun-flow" aria-live="polite">
+            <div class="sun-flow-head"><strong id="sun-state">Loading Sun and Moon…</strong><span id="sun-next"></span></div>
+            <div id="sun-track" class="sun-track" role="img" aria-label="Daily sunlight timeline"><i class="sun-now" aria-hidden="true"></i></div>
+            <div class="sun-events"><button id="jump-sunrise" type="button">↑ <span>Sunrise —</span></button><button id="jump-sunset" type="button">↓ <span>Sunset —</span></button></div>
+            <div id="moon-events" class="moon-events">Moon data loading…</div>
+            <small id="sun-source"></small>
+          </div>
           <label class="switch-row" for="cyc">Animate day & night<input id="cyc" type="checkbox" role="switch"></label>
+          <label class="switch-row explore-daylight" for="daylight">Keep terrain in daylight<input id="daylight" type="checkbox" role="switch"></label>
+          <p class="panel-note explore-daylight">Explore with clear daylight while preserving the selected astronomical time.</p>
           <p class="panel-note">Watch daylight travel across the globe.</p>
         </div>
       </details>
     </aside>
 
     <section class="location-card" aria-label="Current view">
-      <div class="eyebrow"><span class="live-dot"></span> EXPLORING EARTH</div>
+      <div class="eyebrow"><span class="live-dot"></span> <span id="view-mode-label">EXPLORING EARTH</span></div>
       <h1 id="place">A world to discover</h1>
       <div id="hud"></div>
+      <div id="sky-object" hidden><strong id="sky-object-name"></strong><span id="sky-object-details"></span></div>
       <div id="loading-state" role="status">Preparing your view…</div>
     </section>
 
@@ -74,7 +105,7 @@
     </nav>
 
     <footer class="footer">
-      <details class="help"><summary>ⓘ <span>How to explore</span></summary><div>Drag to move · Scroll to zoom<br>Right-drag or Shift-drag to orbit<br>Double-click to get closer<br>Arrow keys to move · + / − to zoom</div></details>
+      <details class="help"><summary>ⓘ <span>How to explore</span></summary><div>Drag to move · Scroll to zoom<br>Right-drag or Shift-drag to orbit<br>In Stargaze, drag to look and click a star to identify it<br>Arrow keys to move/look · + / − to zoom</div></details>
       <span class="footer-tagline">Stay curious. Keep exploring.</span>
       <details class="credits"><summary id="credit-label">Map data & credits ↗</summary><div id="credit"></div></details>
     </footer>

@@ -1,6 +1,6 @@
 # Earthviz
 
-An interactive 3D terrain globe with satellite imagery, elevation, sun controls, and place search.
+An interactive 3D terrain globe with satellite imagery, elevation, sun controls, place search, and a time-aware NASA imagery mode.
 
 ## Run locally
 
@@ -14,7 +14,9 @@ Then open the local URL printed by Vite. The production build is created with `n
 ## Data sources
 
 - Elevation: Mapzen Terrarium tiles hosted by AWS
-- Imagery: Sentinel-2 cloudless by EOX or Esri World Imagery
+- Imagery: Sentinel-2 cloudless by EOX, Esri World Imagery, or daily MODIS Terra true color from NASA EOSDIS GIBS
+- Stars: Yale Bright Star Catalogue, 5th edition (`bsc5.json`)
+- Sun and Moon daily events: U.S. Naval Observatory Astronomical Applications API, with an offline solar fallback
 - Search: OpenStreetMap Nominatim, with Open-Meteo geocoding as a fallback
 
 ## Progressive detail
@@ -50,6 +52,50 @@ for production validation. In development, open `/?debug` and call
 and frame progress. Check repeated zoom-in/out, panning during loads, switching
 imagery, coastlines, and mountain views. Imagery quality remains limited by the
 selected provider's available resolution.
+
+## Spacetime
+
+Choose **Spacetime** in the header to browse daily NASA GIBS imagery from the
+MODIS Terra record. Choose and explicitly load one date at a time; there is no
+automatic playback. Native-resolution MODIS is used for global and regional
+views. Local views switch to NASA's 30 m HLS Landsat-8/9 and Sentinel-2
+reflectance layers through zoom 12; deeper terrain tiles crop their matching
+maximum-resolution HLS parent. Only neutral near-black MODIS pixels from genuine
+orbital coverage gaps use the nearest preceding date. Transparent HLS coverage
+and pixels unavailable on both dates remain black. Explore imagery is never
+placed underneath, while dark water and terrain shadows are left intact.
+Changing dates does not discard elevation samples or rebuild terrain geometry;
+terrain refinement remains identical to Explore.
+
+Spacetime lighting follows the selected imagery date. The UTC time slider moves
+through that date's night, civil twilight, sunrise, daylight, sunset, and evening
+twilight using the Sun's astronomical position at the current coordinates.
+
+## Stargazing
+
+Choose **Stargaze** to stand at the selected latitude and longitude and look
+around the local sky. The viewer renders all 9,096 BSC5 entries at their catalog
+visual magnitudes and B−V/temperature colors. J2000 coordinates are advanced to
+the observing date with catalog proper motions and precession, then rotated by
+Greenwich mean sidereal time so the local horizon changes correctly with UTC,
+latitude, and longitude. Choose an observing date and UTC time under **Lighting**,
+or press **Now**. Drag or use the arrow keys to look around, scroll to change the
+field of view, and click a star to see its name, HR number, magnitude, spectral
+class, current altitude, and azimuth.
+
+The **Lighting** panel shows the current location's USNO sunrise, sunset, civil
+twilight, solar transit, Moon rise/set, phase, and illumination in UTC. Its daily
+timeline handles locations whose daylight interval crosses UTC midnight. Sunrise
+and sunset buttons jump directly to those events. In **Explore**, enable **Keep
+terrain in daylight** to place clear daylight over the current view without
+changing the selected astronomical date or time; Spacetime always uses its real
+date and lighting flow.
+
+The Sun and Moon are rendered as distant spheres at their physical apparent
+angular diameters. Solar size follows Earth–Sun distance; lunar size follows the
+topocentric camera–Moon distance, including observer parallax. The Moon shader is
+illuminated from the astronomical Sun direction, so its visible terminator and
+phase evolve continuously with the selected UTC date and time.
 
 ## Exploring the map
 

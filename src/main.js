@@ -1,6 +1,40 @@
 import * as THREE from 'three';
 import { setupUI } from './ui.js';
 import { FALLBACK_INSET_KM, LIMITS, selectFrontier, takeNext, terrainSegments, shouldRefine } from './lod.js';
+import {
+  apparentAngularDiameter,
+  calculateSolarEvents,
+  catalogEquatorial,
+  degrees,
+  equatorialToHorizontal,
+  greenwichMeanSiderealTime,
+  moonEquatorial,
+  starRgb,
+  sunEquatorial,
+} from './astronomy.js';
+import {
+  daylightState,
+  nextPhenomenon,
+  phenomenaByName,
+  timeToMinutes,
+  usnoOneDayUrl,
+} from './solar-flow.js';
+import {
+  GIBS_NATIVE_MAX_ZOOM,
+  GIBS_START_DATE,
+  HLS_L30_LAYER,
+  HLS_NATIVE_MAX_ZOOM,
+  HLS_S30_LAYER,
+  clampDay,
+  dayToIso,
+  gibsAncestor,
+  gibsTileUrl,
+  hlsTileUrl,
+  isGibsNoData,
+  isoToDay,
+  nearestGibsDate,
+  previousUtcDate,
+} from './spacetime.js';
 
 const R = 6371;
 const S = 32; // Elevation sampling grid; rendered geometry is independently adaptive.
@@ -11,8 +45,13 @@ const MAX_TILES = LIMITS.tiles;
 const MAX_QUEUE = LIMITS.queued;
 const MAX_CONCURRENT_LOADS = LIMITS.concurrent;
 const TILE_REQUEST_TIMEOUT = 12000;
+const BSC5_URL = new URL('../bsc5.json', import.meta.url);
 const $ = (id) => document.getElementById(id);
 const clamp = THREE.MathUtils.clamp;
+let mode = 'explore';
+let spacetimeDate = previousUtcDate();
+let nonSpacetimeObservationDay = '';
+let imageryRevision = 0;
 const DEM = (z, x, y) => `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`;
 const IMAGE_SOURCES = {
   esri: {
@@ -25,7 +64,13 @@ const IMAGE_SOURCES = {
     fn: (z, x, y) => `https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/g/${z}/${y}/${x}.jpg`,
     credit: 'Imagery: <a href="https://s2maps.eu" target="_blank" rel="noopener">Sentinel-2 cloudless by EOX</a> (CC BY 4.0, contains modified Copernicus Sentinel data)',
   },
+  gibs: {
+    maxZoom: GIBS_NATIVE_MAX_ZOOM,
+    fn: (z, x, y) => gibsTileUrl(spacetimeDate, z, x, y),
+    credit: 'Daily imagery: <a href="https://www.earthdata.nasa.gov/about/esdis/eosdis/gibs" target="_blank" rel="noopener">NASA EOSDIS GIBS</a> · MODIS Terra Corrected Reflectance (True Color)',
+  },
 };
+const sourceKey = () => (mode === 'spacetime' ? 'gibs' : $('src').value);
 
 // Convert latitude/longitude in radians to a point on the globe.
 // Y is the north pole; east is -Z at longitude 0.
@@ -103,36 +148,43 @@ const atm = new THREE.Mesh(
 );
 scene.add(atm);
 
-const starPositions = [];
-const starSizes = [];
-for (let i = 0; i < 2500; i += 1) {
-  const v = new THREE.Vector3().randomDirection();
-  starPositions.push(v.x, v.y, v.z);
-  starSizes.push(1 + Math.random() * 2.2);
-}
+let starCatalog = [];
+let starEquatorial = [];
+let selectedStar = -1;
+let starStatus = 'Loading the Bright Star Catalogue…';
+let starEpochDay = '';
 const starGeometry = new THREE.BufferGeometry();
-starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
-starGeometry.setAttribute('size', new THREE.Float32BufferAttribute(starSizes, 1));
+starGeometry.setAttribute('position', new THREE.Float32BufferAttribute([], 3));
+starGeometry.setAttribute('size', new THREE.Float32BufferAttribute([], 1));
+starGeometry.setAttribute('color', new THREE.Float32BufferAttribute([], 3));
 const stars = new THREE.Points(
   starGeometry,
   new THREE.ShaderMaterial({
-    uniforms: { uVis: visU },
+    uniforms: { uVis: visU, uPixelRatio: { value: renderer.getPixelRatio() } },
     transparent: true,
     depthWrite: false,
     fog: false,
+    blending: THREE.AdditiveBlending,
     vertexShader: `
       attribute float size;
+      attribute vec3 color;
+      uniform float uPixelRatio;
+      varying vec3 vColor;
       void main() {
-        vec4 p = projectionMatrix * vec4(mat3(viewMatrix) * position, 1.0);
+        vec4 p = projectionMatrix * vec4(mat3(modelViewMatrix) * position, 1.0);
         gl_Position = p.xyww;
-        gl_PointSize = size;
+        gl_PointSize = size * uPixelRatio;
+        vColor = color;
       }
     `,
     fragmentShader: `
       uniform float uVis;
+      varying vec3 vColor;
       void main() {
-        float a = smoothstep(0.5, 0.1, length(gl_PointCoord - 0.5));
-        gl_FragColor = vec4(vec3(1.0), a * uVis);
+        float d = length(gl_PointCoord - 0.5);
+        float a = smoothstep(0.5, 0.08, d);
+        float core = smoothstep(0.18, 0.0, d);
+        gl_FragColor = vec4(vColor * (0.82 + core * 0.35), a * uVis);
       }
     `,
   }),
@@ -141,8 +193,129 @@ stars.frustumCulled = false;
 stars.renderOrder = -1;
 scene.add(stars);
 
+const celestialGeometry = new THREE.SphereGeometry(1, 48, 32);
+const sunBody = new THREE.Mesh(
+  celestialGeometry,
+  new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    fog: false,
+    vertexShader: `
+      varying vec3 vViewNormal;
+      void main() {
+        vViewNormal = normalize(normalMatrix * normal);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vViewNormal;
+      void main() {
+        float mu = clamp(vViewNormal.z, 0.0, 1.0);
+        vec3 edge = vec3(1.0, 0.48, 0.12);
+        vec3 center = vec3(1.0, 0.94, 0.68);
+        vec3 color = mix(edge, center, pow(mu, 0.45));
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `,
+  }),
+);
+sunBody.name = 'Sun';
+sunBody.frustumCulled = false;
+sunBody.renderOrder = -0.6;
+scene.add(sunBody);
+
+const moonSunU = { value: new THREE.Vector3(1, 0, 0) };
+const moonDirectionU = { value: new THREE.Vector3(1, 0, 0) };
+const moonBody = new THREE.Mesh(
+  celestialGeometry,
+  new THREE.ShaderMaterial({
+    uniforms: { uSun: moonSunU, uMoonDirection: moonDirectionU },
+    transparent: true,
+    depthWrite: false,
+    fog: false,
+    vertexShader: `
+      varying vec3 vWorldNormal;
+      varying vec3 vLocalNormal;
+      void main() {
+        vLocalNormal = normal;
+        vWorldNormal = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uSun;
+      uniform vec3 uMoonDirection;
+      varying vec3 vWorldNormal;
+      varying vec3 vLocalNormal;
+      void main() {
+        float sunlight = smoothstep(-0.012, 0.018, dot(normalize(vWorldNormal), normalize(uSun)));
+        float towardViewer = clamp(dot(normalize(vWorldNormal), -normalize(uMoonDirection)), 0.0, 1.0);
+        float limb = pow(towardViewer, 0.16);
+        float maria = sin(vLocalNormal.x * 31.0 + vLocalNormal.y * 17.0)
+          * sin(vLocalNormal.z * 43.0 - vLocalNormal.x * 11.0);
+        vec3 stone = vec3(0.72, 0.73, 0.69) * (0.94 + 0.06 * maria);
+        float earthshine = 0.018;
+        gl_FragColor = vec4(stone * (earthshine + sunlight * 0.982) * limb, 1.0);
+      }
+    `,
+  }),
+);
+moonBody.name = 'Moon';
+moonBody.frustumCulled = false;
+moonBody.renderOrder = -0.5;
+scene.add(moonBody);
+
+function commonStarName(star) {
+  const names = star.Notes?.find(note => note.Category === 'Star names')?.Remark;
+  if (names) return names.split(';')[0].trim().replace(/\.$/, '').toLowerCase()
+    .replace(/(^|\s)\S/g, letter => letter.toUpperCase());
+  return star.Name?.trim() || `HR ${star.HR}`;
+}
+
+function updateStarEpoch(date, force = false) {
+  if (!starCatalog.length) return;
+  const day = date.toISOString().slice(0, 10);
+  if (!force && day === starEpochDay) return;
+  starEpochDay = day;
+  const positions = new Float32Array(starCatalog.length * 3);
+  starEquatorial = new Array(starCatalog.length);
+  for (let i = 0; i < starCatalog.length; i += 1) {
+    const equatorial = catalogEquatorial(starCatalog[i], date);
+    starEquatorial[i] = equatorial;
+    const c = Math.cos(equatorial.dec);
+    positions[3 * i] = c * Math.cos(equatorial.ra);
+    positions[3 * i + 1] = Math.sin(equatorial.dec);
+    positions[3 * i + 2] = -c * Math.sin(equatorial.ra);
+  }
+  stars.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  stars.geometry.computeBoundingSphere();
+}
+
+async function loadStarCatalog() {
+  try {
+    const response = await fetch(BSC5_URL);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    starCatalog = await response.json();
+    const sizes = new Float32Array(starCatalog.length);
+    const colors = new Float32Array(starCatalog.length * 3);
+    for (let i = 0; i < starCatalog.length; i += 1) {
+      const magnitude = Number.parseFloat(starCatalog[i].Vmag);
+      sizes[i] = clamp(1.15 + 2.7 * 10 ** (-0.2 * (Number.isFinite(magnitude) ? magnitude : 6)), 1.1, 8);
+      colors.set(starRgb(starCatalog[i]), i * 3);
+    }
+    stars.geometry.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
+    stars.geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    updateStarEpoch(observationDate(), true);
+    starStatus = `${starCatalog.length.toLocaleString()} catalog stars · click a star to identify it`;
+  } catch (error) {
+    console.error('Could not load bsc5.json:', error);
+    starStatus = 'The Bright Star Catalogue could not be loaded';
+  }
+}
+
 /* ---------- tiles ---------- */
 const tiles = new Map();
+const gibsImageCache = new Map();
 // Keep tiny elevation bounds after releasing GPU assets, so evicted offscreen
 // tiles don't return with a huge unknown-height bound and immediately reload.
 const elevationBounds = new Map();
@@ -154,6 +327,11 @@ let active = 0;
 const sampleCanvas = document.createElement('canvas');
 sampleCanvas.width = sampleCanvas.height = T;
 const sampleContext = sampleCanvas.getContext('2d', { willReadFrequently: true });
+const blackTile = document.createElement('canvas');
+blackTile.width = blackTile.height = T;
+const blackTileContext = blackTile.getContext('2d');
+blackTileContext.fillStyle = '#000';
+blackTileContext.fillRect(0, 0, T, T);
 const commits = [];
 const loadImage = (url, signal) => new Promise((resolve) => {
   const image = new Image();
@@ -208,6 +386,8 @@ function getTile(z, x, y, cache = true) {
     minHeight: 0,
     maxHeight: 0,
     terrainRange: 0,
+    imageryRevision: -1,
+    imagerySource: null,
     used: 0,
     mesh: null,
     height: null,
@@ -342,97 +522,251 @@ function inheritElevation(tile) {
   tile.land = parent.land === false ? false : null;
 }
 
+function textureFrom(image) {
+  const texture = new THREE.Texture(image);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 8);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function replaceTileTexture(tile, image) {
+  if (!tile.mesh) return;
+  const oldTexture = tile.mesh.material.map;
+  tile.mesh.material.map = textureFrom(image);
+  tile.mesh.material.needsUpdate = true;
+  oldTexture?.dispose();
+}
+
+function imagePixels(image) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = T;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  context.drawImage(image, 0, 0, T, T);
+  return { canvas, context, pixels: context.getImageData(0, 0, T, T) };
+}
+
+function hasGibsNoData(image) {
+  try {
+    const pixels = imagePixels(image).pixels.data;
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (isGibsNoData(pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3])) return true;
+    }
+  } catch (error) {
+    console.warn('Could not inspect GIBS coverage:', error);
+  }
+  return false;
+}
+
+function fillGibsGaps(primary, nearest) {
+  try {
+    const output = imagePixels(primary);
+    const adjacent = nearest ? imagePixels(nearest).pixels.data : null;
+    const pixels = output.pixels.data;
+    for (let i = 0; i < pixels.length; i += 4) {
+      const primaryMissing = isGibsNoData(pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]);
+      const adjacentAvailable = adjacent
+        && !isGibsNoData(adjacent[i], adjacent[i + 1], adjacent[i + 2], adjacent[i + 3]);
+      if (!primaryMissing || !adjacentAvailable) continue;
+      pixels[i] = adjacent[i];
+      pixels[i + 1] = adjacent[i + 1];
+      pixels[i + 2] = adjacent[i + 2];
+      pixels[i + 3] = adjacent[i + 3];
+    }
+    output.context.putImageData(output.pixels, 0, 0);
+    return output.canvas;
+  } catch (error) {
+    console.warn('Could not compose Spacetime imagery:', error);
+    return primary;
+  }
+}
+
+function composeHlsImagery(landsat, sentinel) {
+  if (!landsat && !sentinel) return blackTile;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = T;
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#000';
+  context.fillRect(0, 0, T, T);
+  // Both HLS products carry transparent no-data pixels. Landsat provides the
+  // base and Sentinel fills only where that day's Sentinel acquisition exists.
+  if (landsat) context.drawImage(landsat, 0, 0, T, T);
+  if (sentinel) context.drawImage(sentinel, 0, 0, T, T);
+  return canvas;
+}
+
+function cachedGibsImage(url) {
+  let request = gibsImageCache.get(url);
+  if (!request) {
+    request = loadImage(url).then((image) => {
+      if (!image) gibsImageCache.delete(url);
+      return image;
+    });
+    gibsImageCache.set(url, request);
+  }
+  return request;
+}
+
+function cropGibsAncestor(image, ancestor) {
+  if (!image || ancestor.scale === 1) return image;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = T;
+  const context = canvas.getContext('2d');
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  const sourceWidth = width / ancestor.scale;
+  const sourceHeight = height / ancestor.scale;
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(
+    image,
+    ancestor.childX * sourceWidth,
+    ancestor.childY * sourceHeight,
+    sourceWidth,
+    sourceHeight,
+    0,
+    0,
+    T,
+    T,
+  );
+  return canvas;
+}
+
+async function loadTileImagery(tile, requestedSource, signal) {
+  if (requestedSource !== 'gibs') {
+    return loadImage(IMAGE_SOURCES[requestedSource].fn(tile.z, tile.x, tile.y), signal);
+  }
+
+  if (tile.z <= GIBS_NATIVE_MAX_ZOOM) {
+    const currentUrl = gibsTileUrl(spacetimeDate, tile.z, tile.x, tile.y);
+    const nearestUrl = gibsTileUrl(nearestGibsDate(spacetimeDate), tile.z, tile.x, tile.y);
+    const primary = await cachedGibsImage(currentUrl);
+    if (!primary) return (await cachedGibsImage(nearestUrl)) || blackTile;
+    if (!hasGibsNoData(primary)) return primary;
+
+    // MODIS JPEGs encode empty orbital swaths as black. Fill only those pixels
+    // from the adjacent day; anything still absent remains black.
+    const nearest = await cachedGibsImage(nearestUrl);
+    return fillGibsGaps(primary, nearest);
+  }
+
+  // Local views use NASA's 30 m HLS Landsat/Sentinel reflectance products.
+  // Tiles deeper than z12 crop their matching maximum-resolution HLS parent.
+  const ancestor = gibsAncestor(tile.z, tile.x, tile.y, HLS_NATIVE_MAX_ZOOM);
+  const urls = [HLS_L30_LAYER, HLS_S30_LAYER]
+    .map(layer => hlsTileUrl(layer, spacetimeDate, ancestor.z, ancestor.x, ancestor.y));
+  const [landsat, sentinel] = await Promise.all(urls.map(url => cachedGibsImage(url)));
+  return composeHlsImagery(
+    cropGibsAncestor(landsat, ancestor),
+    cropGibsAncestor(sentinel, ancestor),
+  );
+}
+
 async function loadTile(tile) {
   tile.loading = true;
   tile.controller = new AbortController();
   const signal = tile.controller.signal;
   active += 1;
   const requestedGeneration = generation;
-  const fetchElevation = needsElevation(tile);
+  const requestedImageryRevision = imageryRevision;
+  const requestedSource = sourceKey();
+  const terrainNeeded = !tile.ready || (tile.demDeferred && needsElevation(tile));
+  const fetchElevation = terrainNeeded && needsElevation(tile);
+  const imageNeeded = !tile.mesh?.material.map?.image || tile.imageryRevision !== requestedImageryRevision;
   try {
     const [dem, image] = await Promise.all([
-    fetchElevation ? loadImage(DEM(tile.z, tile.x, tile.y), signal) : null,
-    tile.mesh?.material.map?.image || loadImage(IMAGE_SOURCES[$('src').value].fn(tile.z, tile.x, tile.y), signal),
+      fetchElevation ? loadImage(DEM(tile.z, tile.x, tile.y), signal) : null,
+      imageNeeded
+        ? loadTileImagery(tile, requestedSource, signal)
+        : tile.mesh.material.map.image,
     ]);
     if (requestedGeneration !== generation || signal.aborted) return;
+    if (imageNeeded && requestedImageryRevision !== imageryRevision) return;
     if (!image) { tile.retryAt = performance.now() + 15000; return; }
-    // Decode/build at most one completed tile per animation frame.
+    // Texture swaps and geometry builds are committed progressively, one per frame.
     await new Promise((resolve) => commits.push({ tile, resolve }));
     if (requestedGeneration !== generation || signal.aborted) return;
+    if (imageNeeded && requestedImageryRevision !== imageryRevision) return;
 
-  tile.height = new Float32Array((S + 1) ** 2);
-  inheritElevation(tile);
-  tile.demDeferred = !dem;
-  if (fetchElevation && !dem) tile.retryAt = performance.now() + 15000;
-  if (dem) {
-    sampleContext.drawImage(dem, 0, 0, T, T);
-    const data = sampleContext.getImageData(0, 0, T, T).data;
-    const heightAt = (x, y) => {
-      const index = 4 * (y * T + x);
-      return data[index] * 256 + data[index + 1] + data[index + 2] / 256 - 32768;
-    };
-    let minHeight = Infinity;
-    let maxHeight = -Infinity;
-    for (let j = 0; j <= S; j += 1) {
-      for (let i = 0; i <= S; i += 1) {
-        const px = (i / S) * (T - 1);
-        const py = (j / S) * (T - 1);
-        const x0 = px | 0;
-        const y0 = py | 0;
-        const x1 = Math.min(T - 1, x0 + 1);
-        const y1 = Math.min(T - 1, y0 + 1);
-        const fx = px - x0;
-        const fy = py - y0;
-        const sampledHeight = (
-          (heightAt(x0, y0) * (1 - fx) + heightAt(x1, y0) * fx) * (1 - fy)
-          + (heightAt(x0, y1) * (1 - fx) + heightAt(x1, y1) * fx) * fy
-        );
-        tile.height[j * (S + 1) + i] = sampledHeight;
-        minHeight = Math.min(minHeight, sampledHeight);
-        maxHeight = Math.max(maxHeight, sampledHeight);
+    // A time/source change only replaces the GPU texture. Elevation samples and
+    // geometry remain untouched unless the view independently requests more DEM detail.
+    if (!terrainNeeded && tile.mesh) {
+      replaceTileTexture(tile, image);
+      tile.imageryRevision = requestedImageryRevision;
+      tile.imagerySource = requestedSource;
+      tile.retryAt = 0;
+      return;
+    }
+
+    tile.height = new Float32Array((S + 1) ** 2);
+    inheritElevation(tile);
+    tile.demDeferred = !dem;
+    if (fetchElevation && !dem) tile.retryAt = performance.now() + 15000;
+    if (dem) {
+      sampleContext.drawImage(dem, 0, 0, T, T);
+      const data = sampleContext.getImageData(0, 0, T, T).data;
+      const heightAt = (x, y) => {
+        const index = 4 * (y * T + x);
+        return data[index] * 256 + data[index + 1] + data[index + 2] / 256 - 32768;
+      };
+      let minHeight = Infinity;
+      let maxHeight = -Infinity;
+      for (let j = 0; j <= S; j += 1) {
+        for (let i = 0; i <= S; i += 1) {
+          const px = (i / S) * (T - 1);
+          const py = (j / S) * (T - 1);
+          const x0 = px | 0;
+          const y0 = py | 0;
+          const x1 = Math.min(T - 1, x0 + 1);
+          const y1 = Math.min(T - 1, y0 + 1);
+          const fx = px - x0;
+          const fy = py - y0;
+          const sampledHeight = (
+            (heightAt(x0, y0) * (1 - fx) + heightAt(x1, y0) * fx) * (1 - fy)
+            + (heightAt(x0, y1) * (1 - fx) + heightAt(x1, y1) * fx) * fy
+          );
+          tile.height[j * (S + 1) + i] = sampledHeight;
+          minHeight = Math.min(minHeight, sampledHeight);
+          maxHeight = Math.max(maxHeight, sampledHeight);
+        }
+      }
+      elevationBounds.delete(tile.key);
+      elevationBounds.set(tile.key, { min: minHeight, max: maxHeight });
+      if (elevationBounds.size > 1024) elevationBounds.delete(elevationBounds.keys().next().value);
+      tile.hasElevation = true;
+      tile.minHeight = minHeight;
+      tile.maxHeight = maxHeight;
+      tile.terrainRange = Math.max(0, maxHeight - minHeight);
+      // Inspect every DEM pixel, not just mesh vertices: small islands and
+      // coastlines must not disappear between sparse geometry samples.
+      tile.land = false;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] * 256 + data[i + 1] + data[i + 2] / 256 - 32768 >= 0) {
+          tile.land = true;
+          break;
+        }
       }
     }
-    elevationBounds.delete(tile.key);
-    elevationBounds.set(tile.key, { min: minHeight, max: maxHeight });
-    if (elevationBounds.size > 1024) elevationBounds.delete(elevationBounds.keys().next().value);
-    tile.hasElevation = true;
-    tile.minHeight = minHeight;
-    tile.maxHeight = maxHeight;
-    tile.terrainRange = Math.max(0, maxHeight - minHeight);
-    // Inspect every DEM pixel, not just mesh vertices: small islands and
-    // coastlines must not disappear between sparse geometry samples.
-    tile.land = false;
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i] * 256 + data[i + 1] + data[i + 2] / 256 - 32768 >= 0) {
-        tile.land = true;
-        break;
-      }
-    }
-  }
 
-  const material = new THREE.MeshStandardMaterial({
-    roughness: 1,
-    metalness: 0,
-    color: image ? 0xffffff : 0x5a6b5a,
-  });
-  if (image) {
-    const texture = new THREE.Texture(image);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 8);
-    texture.needsUpdate = true;
-    material.map = texture;
-  }
-  if (tile.mesh) {
-    scene.remove(tile.mesh);
-    tile.mesh.geometry.dispose();
-    tile.mesh.material.map?.dispose();
-    tile.mesh.material.dispose();
-  }
-  tile.segments = desiredSegments(tile);
-  tile.mesh = new THREE.Mesh(buildGeometry(tile), material);
-  tile.mesh.visible = false;
-  tile.mesh.frustumCulled = false;
-  scene.add(tile.mesh);
+    const material = new THREE.MeshStandardMaterial({
+      roughness: 1,
+      metalness: 0,
+      color: 0xffffff,
+      map: textureFrom(image),
+    });
+    if (tile.mesh) {
+      scene.remove(tile.mesh);
+      tile.mesh.geometry.dispose();
+      tile.mesh.material.map?.dispose();
+      tile.mesh.material.dispose();
+    }
+    tile.segments = desiredSegments(tile);
+    tile.mesh = new THREE.Mesh(buildGeometry(tile), material);
+    tile.mesh.visible = false;
+    tile.mesh.frustumCulled = false;
+    scene.add(tile.mesh);
+    tile.imageryRevision = requestedImageryRevision;
+    tile.imagerySource = requestedSource;
     tile.ready = true;
   } catch (error) {
     tile.retryAt = performance.now() + 15000;
@@ -446,7 +780,8 @@ async function loadTile(tile) {
 
 function requestTile(tile) {
   tile.used = frame;
-  if ((!tile.ready || (tile.demDeferred && needsElevation(tile))) && !tile.loading && !tile.queued && performance.now() >= tile.retryAt && queue.length < MAX_QUEUE) {
+  const needsWork = !tile.ready || tile.imageryRevision !== imageryRevision || (tile.demDeferred && needsElevation(tile));
+  if (needsWork && !tile.loading && !tile.queued && performance.now() >= tile.retryAt && queue.length < MAX_QUEUE) {
     tile.queued = true;
     queue.push(tile);
   }
@@ -529,6 +864,7 @@ const roots = [];
 const INITIAL_VIEW = { lat: 20 * D2R, lng: 0, range: 10000, heading: 0, tilt: 0.35 };
 const LOCAL_VIEW_RANGE = 16;
 const view = { ...INITIAL_VIEW };
+const skyView = { azimuth: 0, altitude: 25 * D2R, fov: 60 };
 let flight = null;
 let groundHeight = 0;
 const TERRAIN_SAFETY_MARGIN = 0.12;
@@ -547,6 +883,26 @@ function frameCamera() {
     Math.cos(view.lat),
     Math.sin(view.lat) * Math.sin(view.lng),
   );
+  if (mode === 'stargaze') {
+    const horizontal = north.clone().multiplyScalar(Math.cos(skyView.azimuth))
+      .addScaledVector(east, Math.sin(skyView.azimuth));
+    const look = horizontal.multiplyScalar(Math.cos(skyView.altitude))
+      .addScaledVector(unit, Math.sin(skyView.altitude)).normalize();
+    const vertical = unit.clone().addScaledVector(look, -unit.dot(look)).normalize();
+    cameraPosition.copy(unit).multiplyScalar(R + groundHeight + 0.003);
+    cameraUnit.copy(unit);
+    camera.near = 0.001;
+    camera.far = 2 * R + 300;
+    camera.fov = skyView.fov;
+    camera.updateProjectionMatrix();
+    camera.position.set(0, 0, 0);
+    camera.up.copy(vertical);
+    camera.lookAt(look);
+    camera.updateMatrixWorld();
+    frustum.setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    pixelFactor = innerHeight / (2 * Math.tan(camera.fov * D2R / 2));
+    return;
+  }
   const direction = north.multiplyScalar(Math.cos(view.heading)).addScaledVector(east, Math.sin(view.heading));
   target.copy(unit).multiplyScalar(R + groundHeight);
   // Keep a small clearance above the sampled focus point.
@@ -570,7 +926,8 @@ function frameCamera() {
   }
   cameraUnit.copy(cameraPosition).normalize();
   camera.near = clamp(view.range * 0.02, 0.002, 800);
-  camera.far = cameraPosition.length() + R + 200;
+  camera.far = cameraPosition.length() + R + 1000;
+  camera.fov = 50;
   camera.updateProjectionMatrix();
   camera.position.set(0, 0, 0);
   camera.up.copy(unit);
@@ -590,7 +947,10 @@ function tileInView(tile) {
 
 function selectTiles() {
   const threshold = [0, 900, 750, 620, 520, 440, 360][+$('det').value];
-  const maxZoom = Math.min(MAX_ZOOM, IMAGE_SOURCES[$('src').value].maxZoom);
+  // Terrain detail always follows the selected Explore provider. Spacetime
+  // reuses the highest-resolution GIBS parent without changing terrain LOD.
+  const detailSource = mode === 'spacetime' ? $('src').value : sourceKey();
+  const maxZoom = Math.min(MAX_ZOOM, IMAGE_SOURCES[detailSource].maxZoom);
   const selected = selectFrontier({
     roots,
     inView: tileInView,
@@ -715,7 +1075,13 @@ function pan(dx, dy) {
 const canvas = renderer.domElement;
 let drag = null;
 canvas.addEventListener('pointerdown', (event) => {
-  drag = { x: event.clientX, y: event.clientY, rotate: event.button === 2 || event.shiftKey || event.ctrlKey };
+  drag = {
+    x: event.clientX,
+    y: event.clientY,
+    startX: event.clientX,
+    startY: event.clientY,
+    rotate: mode === 'stargaze' || event.button === 2 || event.shiftKey || event.ctrlKey,
+  };
   canvas.setPointerCapture(event.pointerId);
   cancelFlight();
 });
@@ -725,34 +1091,54 @@ canvas.addEventListener('pointermove', (event) => {
   const dy = event.clientY - drag.y;
   drag.x = event.clientX;
   drag.y = event.clientY;
-  if (drag.rotate) {
+  if (mode === 'stargaze') {
+    skyView.azimuth = wrapLongitude(skyView.azimuth + dx * 0.004);
+    skyView.altitude = clamp(skyView.altitude + dy * 0.004, -12 * D2R, 88 * D2R);
+  } else if (drag.rotate) {
     view.heading += dx * 0.005;
     view.tilt = clamp(view.tilt + dy * 0.005, 0.02, 1.45);
   } else {
     pan(dx, dy);
   }
 });
-canvas.addEventListener('pointerup', () => { drag = null; });
+canvas.addEventListener('pointerup', (event) => {
+  if (mode === 'stargaze' && drag && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) {
+    pickStar(event.clientX, event.clientY);
+  }
+  drag = null;
+});
 canvas.addEventListener('pointercancel', () => { drag = null; });
 canvas.addEventListener('lostpointercapture', () => { drag = null; });
 canvas.addEventListener('contextmenu', (event) => event.preventDefault());
 canvas.addEventListener('wheel', (event) => {
   event.preventDefault();
   cancelFlight();
-  view.range = clamp(view.range * Math.exp(event.deltaY * 0.0012), 0.6, 30000);
+  if (mode === 'stargaze') skyView.fov = clamp(skyView.fov * Math.exp(event.deltaY * 0.001), 18, 90);
+  else view.range = clamp(view.range * Math.exp(event.deltaY * 0.0012), 0.6, 30000);
 }, { passive: false });
 canvas.addEventListener('dblclick', () => {
   cancelFlight();
-  view.range = clamp(view.range * 0.5, 0.6, 30000);
+  if (mode === 'stargaze') skyView.fov = clamp(skyView.fov * 0.65, 18, 90);
+  else view.range = clamp(view.range * 0.5, 0.6, 30000);
 });
 addEventListener('keydown', (event) => {
   if (['INPUT', 'SELECT', 'BUTTON'].includes(document.activeElement?.tagName)) return;
+  if (mode === 'stargaze' && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+    if (event.key === 'ArrowLeft') skyView.azimuth -= 5 * D2R;
+    if (event.key === 'ArrowRight') skyView.azimuth += 5 * D2R;
+    if (event.key === 'ArrowUp') skyView.altitude = clamp(skyView.altitude + 5 * D2R, -12 * D2R, 88 * D2R);
+    if (event.key === 'ArrowDown') skyView.altitude = clamp(skyView.altitude - 5 * D2R, -12 * D2R, 88 * D2R);
+    event.preventDefault();
+    return;
+  }
   if (event.key === '+' || event.key === '=') {
     cancelFlight();
-    view.range = clamp(view.range * 0.7, 0.6, 30000);
+    if (mode === 'stargaze') skyView.fov = clamp(skyView.fov * 0.7, 18, 90);
+    else view.range = clamp(view.range * 0.7, 0.6, 30000);
   } else if (event.key === '-' || event.key === '_') {
     cancelFlight();
-    view.range = clamp(view.range / 0.7, 0.6, 30000);
+    if (mode === 'stargaze') skyView.fov = clamp(skyView.fov / 0.7, 18, 90);
+    else view.range = clamp(view.range / 0.7, 0.6, 30000);
   } else if (event.key === 'ArrowLeft') {
     cancelFlight();
     pan(-innerWidth * 0.08, 0);
@@ -774,27 +1160,239 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  stars.material.uniforms.uPixelRatio.value = renderer.getPixelRatio();
 });
 
 /* ---------- sun, sky and atmosphere ---------- */
 const sunDirection = new THREE.Vector3();
+const moonGeocentric = new THREE.Vector3();
+const moonTopocentric = new THREE.Vector3();
 const background = new THREE.Color();
+const projectionScratch = new THREE.Vector3();
+const AU_KM = 149597870.7;
+const SUN_RADIUS_KM = 695700;
+const MOON_RADIUS_KM = 1737.4;
+let sunEphemeris = null;
+let moonEphemeris = null;
+let astronomySidereal = 0;
+const riseSetCache = new Map();
+let dailyEvents = null;
+let riseSetContext = '';
+let riseSetTimer = 0;
+let riseSetController = null;
+
+function currentRiseSetContext() {
+  return `${$('sky-date').value}:${(view.lat / D2R).toFixed(3)}:${(view.lng / D2R).toFixed(3)}`;
+}
+
+function sunTimelineGradient(sun, polarState) {
+  if (polarState === 'alwaysUp') return '#83b6d3';
+  if (polarState === 'alwaysDown') return '#070b16';
+  const boundaries = [0, 1440, ...[
+    sun['Begin Civil Twilight'], sun.Rise, sun.Set, sun['End Civil Twilight'],
+  ].map(timeToMinutes).filter(Number.isFinite)].sort((a, b) => a - b);
+  const colors = {
+    Night: '#070b16',
+    'Morning twilight': '#7b4f5c',
+    Daylight: '#83b6d3',
+    'Evening twilight': '#704655',
+  };
+  const stops = [];
+  for (let i = 0; i < boundaries.length - 1; i += 1) {
+    const start = boundaries[i];
+    const end = boundaries[i + 1];
+    const color = colors[daylightState(sun, (start + end) / 2)];
+    stops.push(`${color} ${(start / 14.4).toFixed(2)}%`, `${color} ${(end / 14.4).toFixed(2)}%`);
+  }
+  return `linear-gradient(to right, ${stops.join(',')})`;
+}
+
+function renderDailyEvents() {
+  const minute = ((+$('tod').value * 60) % 1440 + 1440) % 1440;
+  $('sun-track').style.setProperty('--now', `${minute / 14.4}%`);
+  if (!dailyEvents) return;
+  const sun = phenomenaByName(dailyEvents.sundata);
+  const moon = phenomenaByName(dailyEvents.moondata);
+  const state = dailyEvents.polarState === 'alwaysUp'
+    ? 'Polar daylight'
+    : (dailyEvents.polarState === 'alwaysDown' ? 'Polar night' : daylightState(sun, minute));
+  const next = nextPhenomenon(sun, minute);
+  $('sun-state').textContent = state;
+  $('sun-next').textContent = next ? `Next: ${next.name.replace('Begin Civil Twilight', 'Dawn').replace('End Civil Twilight', 'Dusk')} ${next.time}` : 'No horizon crossing';
+  $('sun-track').style.background = sunTimelineGradient(sun, dailyEvents.polarState);
+  $('sun-track').setAttribute('aria-label', `${state}. Sunrise ${sun.Rise || 'none'}, sunset ${sun.Set || 'none'}, UTC.`);
+  for (const [id, label, time] of [
+    ['jump-sunrise', 'Sunrise', sun.Rise],
+    ['jump-sunset', 'Sunset', sun.Set],
+  ]) {
+    const button = $(id);
+    button.disabled = !time;
+    button.dataset.time = time || '';
+    button.querySelector('span').textContent = `${label} ${time || '—'}`;
+  }
+  const moonBits = [dailyEvents.curphase, dailyEvents.fracillum, moon.Rise && `↑ ${moon.Rise}`, moon.Set && `↓ ${moon.Set}`].filter(Boolean);
+  $('moon-events').textContent = moonBits.length ? `Moon · ${moonBits.join(' · ')} UTC` : 'Moon schedule unavailable offline';
+  $('sun-source').textContent = dailyEvents.source === 'usno'
+    ? `USNO Astronomical Applications API ${dailyEvents.apiversion || ''} · UTC`
+    : 'Local solar fallback · USNO unavailable';
+}
+
+async function loadDailyEvents(context) {
+  const [date, latText, lngText] = context.split(':');
+  const latitude = +latText;
+  const longitude = +lngText;
+  const fallback = calculateSolarEvents(date, latitude * D2R, longitude * D2R);
+  dailyEvents = { ...fallback, moondata: [], source: 'fallback' };
+  renderDailyEvents();
+  if (riseSetCache.has(context)) {
+    dailyEvents = riseSetCache.get(context);
+    renderDailyEvents();
+    return;
+  }
+  riseSetController?.abort();
+  riseSetController = new AbortController();
+  const requestController = riseSetController;
+  const timeout = setTimeout(() => requestController.abort(), 10000);
+  try {
+    const response = await fetch(usnoOneDayUrl(date, latitude, longitude), {
+      signal: requestController.signal,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const result = await response.json();
+    if (result.error || !result.properties?.data) throw new Error(result.error || 'Invalid USNO response');
+    const events = {
+      ...result.properties.data,
+      polarState: fallback.polarState,
+      apiversion: result.apiversion,
+      source: 'usno',
+    };
+    riseSetCache.set(context, events);
+    if (context === riseSetContext) {
+      dailyEvents = events;
+      renderDailyEvents();
+    }
+  } catch (error) {
+    if (error.name !== 'AbortError') console.warn('USNO Sun/Moon schedule unavailable:', error);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function scheduleDailyEvents(force = false) {
+  const context = currentRiseSetContext();
+  if (!force && context === riseSetContext) return;
+  riseSetContext = context;
+  clearTimeout(riseSetTimer);
+  riseSetTimer = setTimeout(() => loadDailyEvents(context), force ? 0 : 350);
+}
+
+function observationDate() {
+  const day = $('sky-date')?.value || new Date().toISOString().slice(0, 10);
+  const midnight = Date.parse(`${day}T00:00:00Z`);
+  return new Date(midnight + (+$('tod').value || 0) * 3600000);
+}
+
+function setObservationControls(date) {
+  $('sky-date').value = date.toISOString().slice(0, 10);
+  $('tod').value = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
+}
+
 function updateSun() {
-  const now = new Date();
-  const dayOfYear = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 864e5);
-  const hour = +$('tod').value;
-  const declination = 23.44 * D2R * Math.sin((2 * Math.PI * (284 + dayOfYear)) / 365);
-  sunDirection.copy(ll2v(declination, -(hour - 12) * 15 * D2R));
+  const date = observationDate();
+  const sun = sunEquatorial(date);
+  const moon = moonEquatorial(date);
+  const sidereal = greenwichMeanSiderealTime(date);
+  sunEphemeris = sun;
+  moonEphemeris = moon;
+  astronomySidereal = sidereal;
+  sunDirection.copy(ll2v(sun.dec, sun.ra - sidereal));
+  moonGeocentric.copy(ll2v(moon.dec, moon.ra - sidereal, moon.distanceKm));
   sunU.value.copy(sunDirection);
   sunL.position.copy(sunDirection).multiplyScalar(10);
+  stars.rotation.y = -sidereal;
+  stars.updateMatrixWorld();
+  updateStarEpoch(date);
+  updateSelectedStar();
+  renderDailyEvents();
+  const hour = +$('tod').value;
   const minutes = Math.round(hour * 60) % 1440;
   $('tl').textContent = `Sun ${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')} UTC`;
+}
+
+function updateCelestialBodies() {
+  if (!sunEphemeris || !moonEphemeris) return;
+  const renderDistance = camera.far * 0.994;
+  const sunAngularRadius = apparentAngularDiameter(SUN_RADIUS_KM, sunEphemeris.distanceAu * AU_KM) / 2;
+  sunBody.position.copy(sunDirection).multiplyScalar(renderDistance);
+  sunBody.scale.setScalar(Math.tan(sunAngularRadius) * renderDistance);
+
+  // The Moon's parallax is large enough to matter. Subtract the actual virtual
+  // camera position from its geocentric ECEF position before projecting it.
+  moonGeocentric.copy(ll2v(
+    moonEphemeris.dec,
+    moonEphemeris.ra - astronomySidereal,
+    moonEphemeris.distanceKm,
+  ));
+  moonTopocentric.copy(moonGeocentric).sub(cameraPosition);
+  const moonDistance = moonTopocentric.length();
+  const moonDirection = moonTopocentric.normalize();
+  const moonAngularRadius = apparentAngularDiameter(MOON_RADIUS_KM, moonDistance) / 2;
+  moonBody.position.copy(moonDirection).multiplyScalar(renderDistance);
+  moonBody.scale.setScalar(Math.tan(moonAngularRadius) * renderDistance);
+  moonSunU.value.copy(sunDirection);
+  moonDirectionU.value.copy(moonDirection);
+}
+
+function updateSelectedStar() {
+  if (selectedStar < 0 || !starEquatorial[selectedStar]) return;
+  const star = starCatalog[selectedStar];
+  const horizontal = equatorialToHorizontal(
+    starEquatorial[selectedStar].ra,
+    starEquatorial[selectedStar].dec,
+    observationDate(),
+    view.lat,
+    view.lng,
+  );
+  $('sky-object-name').textContent = `${commonStarName(star)} · HR ${star.HR}`;
+  $('sky-object-details').textContent = [
+    `m ${Number.parseFloat(star.Vmag).toFixed(2)}`,
+    star.SpectralCls ? `spectral ${star.SpectralCls}` : null,
+    `alt ${degrees(horizontal.altitude).toFixed(1)}°`,
+    `az ${degrees(horizontal.azimuth).toFixed(1)}°`,
+  ].filter(Boolean).join(' · ');
+  $('sky-object').hidden = false;
+}
+
+function pickStar(clientX, clientY) {
+  if (!starCatalog.length) return;
+  const positions = stars.geometry.getAttribute('position');
+  const rect = canvas.getBoundingClientRect();
+  let closest = -1;
+  let closestDistance = 18 * 18;
+  for (let i = 0; i < positions.count; i += 1) {
+    projectionScratch.fromBufferAttribute(positions, i).applyMatrix4(stars.matrixWorld).project(camera);
+    if (projectionScratch.z < -1 || projectionScratch.z > 1) continue;
+    const x = rect.left + (projectionScratch.x + 1) * rect.width / 2;
+    const y = rect.top + (1 - projectionScratch.y) * rect.height / 2;
+    const distance = (x - clientX) ** 2 + (y - clientY) ** 2;
+    if (distance < closestDistance) {
+      closest = i;
+      closestDistance = distance;
+    }
+  }
+  selectedStar = closest;
+  $('sky-object').hidden = closest < 0;
+  updateSelectedStar();
 }
 
 function updateEnvironment() {
   const altitude = Math.max(0, cameraPosition.length() - R - groundHeight);
   const atmosphere = Math.exp(-altitude / 40);
-  const day = THREE.MathUtils.smoothstep(cameraUnit.dot(sunDirection), -0.12, 0.25);
+  const daylightOverride = mode === 'explore' && $('daylight').checked;
+  const lightingSun = daylightOverride ? cameraUnit : sunDirection;
+  sunU.value.copy(lightingSun);
+  sunL.position.copy(lightingSun).multiplyScalar(10);
+  const day = daylightOverride ? 1 : THREE.MathUtils.smoothstep(cameraUnit.dot(sunDirection), -0.12, 0.25);
   background.setRGB(0.36, 0.58, 0.9).multiplyScalar(atmosphere * day);
   scene.background.copy(background);
   scene.fog.color.copy(background);
@@ -806,17 +1404,127 @@ function updateEnvironment() {
 
 /* ---------- UI ---------- */
 const setCredit = () => {
-  $('credit-label').textContent = `© ${$('src').value === 'eox' ? 'EOX' : 'Esri'} · Mapzen · OSM ↗`;
-  $('credit').innerHTML = `Heights: Mapzen Terrarium (AWS) · ${IMAGE_SOURCES[$('src').value].credit} · Search: © OpenStreetMap contributors`;
+  const key = sourceKey();
+  const provider = key === 'gibs' ? 'NASA GIBS' : (key === 'eox' ? 'EOX' : 'Esri');
+  $('credit-label').textContent = `© ${provider} · Mapzen · OSM ↗`;
+  $('credit').innerHTML = `Heights: Mapzen Terrarium (AWS) · ${IMAGE_SOURCES[key].credit} · Sun/Moon events: <a href="https://aa.usno.navy.mil/data/api" target="_blank" rel="noopener">USNO Astronomical Applications</a> · Stars: Yale Bright Star Catalogue (BSC5) · Search: © OpenStreetMap contributors`;
 };
-setCredit();
-$('src').onchange = () => {
+
+function refreshImagery() {
+  imageryRevision += 1;
+  gibsImageCache.clear();
+  for (const tile of tiles.values()) {
+    tile.retryAt = 0;
+    tile.controller?.abort();
+  }
   setCredit();
-  resetTiles();
-};
+}
+
+setCredit();
+$('src').onchange = refreshImagery;
 $('ex').oninput = () => rebuildAll();
 $('flat').onchange = () => rebuildAll();
 $('tod').oninput = updateSun;
+$('sky-date').onchange = () => {
+  updateSun();
+  scheduleDailyEvents(true);
+};
+$('sky-now').onclick = () => {
+  setObservationControls(new Date());
+  updateSun();
+  scheduleDailyEvents(true);
+};
+for (const id of ['jump-sunrise', 'jump-sunset']) $(id).onclick = event => {
+  const minutes = timeToMinutes(event.currentTarget.dataset.time);
+  if (minutes === null) return;
+  $('tod').value = minutes / 60;
+  updateSun();
+};
+
+const firstGibsDay = isoToDay(GIBS_START_DATE);
+const lastGibsDay = isoToDay(previousUtcDate());
+
+function formatSpacetimeDate(value) {
+  return new Date(`${value}T12:00:00Z`).toLocaleDateString(undefined, {
+    timeZone: 'UTC', year: 'numeric', month: 'long', day: 'numeric',
+  });
+}
+
+function syncSpacetimeDate() {
+  $('spacetime-date').value = spacetimeDate;
+  $('spacetime-label').textContent = formatSpacetimeDate(spacetimeDate);
+}
+
+function setSpacetimeDate(value) {
+  const day = clampDay(isoToDay(value), firstGibsDay, lastGibsDay);
+  if (!Number.isFinite(day)) return;
+  const next = dayToIso(day);
+  const changed = next !== spacetimeDate;
+  spacetimeDate = next;
+  syncSpacetimeDate();
+  if (mode === 'spacetime') {
+    $('sky-date').value = spacetimeDate;
+    updateSun();
+    scheduleDailyEvents(true);
+  }
+  if (changed && mode === 'spacetime') {
+    for (const tile of tiles.values()) replaceTileTexture(tile, blackTile);
+    refreshImagery();
+  }
+}
+
+function setMode(nextMode) {
+  if (mode === nextMode) return;
+  const previousMode = mode;
+  if (nextMode === 'spacetime') nonSpacetimeObservationDay = $('sky-date').value;
+  mode = nextMode;
+  const isSpacetime = mode === 'spacetime';
+  const isStargazing = mode === 'stargaze';
+  if (isSpacetime) {
+    // Never leave Explore imagery visible while the dated NASA tiles load.
+    for (const tile of tiles.values()) replaceTileTexture(tile, blackTile);
+    $('sky-date').value = spacetimeDate;
+    updateSun();
+  } else if (previousMode === 'spacetime' && nonSpacetimeObservationDay) {
+    $('sky-date').value = nonSpacetimeObservationDay;
+    updateSun();
+  }
+  $('sky-date').disabled = isSpacetime;
+  $('sky-now').disabled = isSpacetime;
+  document.body.classList.toggle('spacetime-mode', isSpacetime);
+  document.body.classList.toggle('stargaze-mode', isStargazing);
+  $('spacetime').hidden = !isSpacetime;
+  $('mode-explore').classList.toggle('active', mode === 'explore');
+  $('mode-spacetime').classList.toggle('active', isSpacetime);
+  $('mode-stargaze').classList.toggle('active', isStargazing);
+  $('mode-explore').setAttribute('aria-pressed', String(mode === 'explore'));
+  $('mode-spacetime').setAttribute('aria-pressed', String(isSpacetime));
+  $('mode-stargaze').setAttribute('aria-pressed', String(isStargazing));
+  $('view-mode-label').textContent = isStargazing
+    ? 'STARGAZING FROM HERE'
+    : (isSpacetime ? 'EXPLORING SPACETIME' : 'EXPLORING EARTH');
+  if (!isStargazing) {
+    selectedStar = -1;
+    $('sky-object').hidden = true;
+  }
+  scheduleDailyEvents(true);
+  refreshImagery();
+}
+
+$('mode-explore').onclick = () => setMode('explore');
+$('mode-spacetime').onclick = () => setMode('spacetime');
+$('mode-stargaze').onclick = () => {
+  skyView.azimuth = view.heading;
+  skyView.altitude = 25 * D2R;
+  setMode('stargaze');
+};
+$('spacetime-date').min = GIBS_START_DATE;
+$('spacetime-date').max = dayToIso(lastGibsDay);
+$('spacetime-form').onsubmit = event => {
+  event.preventDefault();
+  setSpacetimeDate($('spacetime-date').value);
+};
+syncSpacetimeDate();
 
 const geocodeCache = new Map();
 let lastGeocodeRequest = 0;
@@ -854,7 +1562,7 @@ async function geocode(query) {
 function flyTo(hit) {
   beginFlight(clamp(hit.lat, -84, 84) * D2R, wrapLongitude(hit.lng * D2R), LOCAL_VIEW_RANGE);
   $('place').textContent = hit.name.split(',').slice(0, 2).join(',').trim();
-  if (!$('cyc').checked) {
+  if (mode !== 'stargaze' && !$('cyc').checked) {
     $('tod').value = (((14 - hit.lng / 15) % 24) + 24) % 24;
     updateSun();
   }
@@ -863,10 +1571,19 @@ function flyTo(hit) {
 setupUI({
   search: geocode,
   flyTo,
-  zoom: factor => { cancelFlight(); view.range = clamp(view.range * factor, 0.6, 30000); },
-  north: () => { cancelFlight(); view.heading = 0; },
+  zoom: factor => {
+    cancelFlight();
+    if (mode === 'stargaze') skyView.fov = clamp(skyView.fov * factor, 18, 90);
+    else view.range = clamp(view.range * factor, 0.6, 30000);
+  },
+  north: () => {
+    cancelFlight();
+    if (mode === 'stargaze') skyView.azimuth = 0;
+    else view.heading = 0;
+  },
   home: () => {
     cancelFlight();
+    setMode('explore');
     Object.assign(view, INITIAL_VIEW);
     groundHeight = 0;
     $('place').textContent = 'A world to discover';
@@ -875,7 +1592,10 @@ setupUI({
 
 /* ---------- main loop ---------- */
 resetTiles();
+setObservationControls(new Date());
 updateSun();
+scheduleDailyEvents(true);
+loadStarCatalog();
 $('place').textContent = 'A world to discover';
 const clock = new THREE.Clock();
 if (import.meta.env.DEV && new URLSearchParams(location.search).has('debug')) {
@@ -885,6 +1605,14 @@ if (import.meta.env.DEV && new URLSearchParams(location.search).has('debug')) {
     deferredElevation: visible.filter(tile => tile.demDeferred).length,
     maxZoom: Math.max(0, ...visible.map(tile => tile.z)),
     maxGrid: Math.max(0, ...visible.map(tile => tile.segments)),
+    imagery: { mode, source: sourceKey(), date: mode === 'spacetime' ? spacetimeDate : null, revision: imageryRevision },
+    celestial: {
+      sunDistanceAu: sunEphemeris?.distanceAu,
+      moonDistanceKm: moonEphemeris ? moonGeocentric.distanceTo(cameraPosition) : null,
+      moonIlluminated: moonEphemeris?.illuminatedFraction,
+      sunDiameterDegrees: sunEphemeris ? degrees(apparentAngularDiameter(SUN_RADIUS_KM, sunEphemeris.distanceAu * AU_KM)) : null,
+      moonDiameterDegrees: moonEphemeris ? degrees(apparentAngularDiameter(MOON_RADIUS_KM, moonGeocentric.distanceTo(cameraPosition))) : null,
+    },
     view: { ...view },
     tiles: visible.map(tile => ({ key: tile.key, land: tile.land, grid: tile.segments })),
   });
@@ -893,11 +1621,15 @@ renderer.setAnimationLoop(() => {
   const deltaTime = Math.min(clock.getDelta(), 0.1);
   frame += 1;
   if ($('cyc').checked) {
-    $('tod').value = (+$('tod').value + deltaTime * 0.8) % 24;
+    const next = new Date(observationDate().getTime() + deltaTime * 0.8 * 3600000);
+    if (mode === 'spacetime') {
+      $('tod').value = (next.getUTCHours() + next.getUTCMinutes() / 60 + next.getUTCSeconds() / 3600) % 24;
+    } else setObservationControls(next);
     updateSun();
   }
   updateNavigation(deltaTime);
   frameCamera();
+  updateCelestialBodies();
   selectTiles();
   updateGeometry();
   pumpQueue();
@@ -914,10 +1646,23 @@ renderer.setAnimationLoop(() => {
   updateEnvironment();
   renderer.render(scene, camera);
   if (frame % 8 === 0) {
-    $('compass-needle').style.transform = `rotate(${-view.heading}rad)`;
-    const loadingMessage = active + queue.length ? 'Refining your view…' : 'Ready to explore';
+    scheduleDailyEvents();
+    if (mode === 'stargaze' && selectedStar >= 0) updateSelectedStar();
+    $('compass-needle').style.transform = `rotate(${-(mode === 'stargaze' ? skyView.azimuth : view.heading)}rad)`;
+    const imageryPending = visible.some(tile => tile.imageryRevision !== imageryRevision);
+    const maxVisibleZoom = Math.max(0, ...visible.map(tile => tile.z));
+    const spacetimeReady = maxVisibleZoom <= GIBS_NATIVE_MAX_ZOOM
+      ? 'Dated MODIS imagery ready'
+      : 'Dated 30 m HLS imagery ready';
+    const loadingMessage = mode === 'stargaze'
+      ? starStatus
+      : mode === 'spacetime' && imageryPending
+      ? `Loading ${formatSpacetimeDate(spacetimeDate)}…`
+      : (active + queue.length ? 'Refining your view…' : (mode === 'spacetime' ? spacetimeReady : 'Ready to explore'));
     if ($('loading-state').textContent !== loadingMessage) $('loading-state').textContent = loadingMessage;
     const altitude = cameraPosition.length() - R - groundHeight;
-    $('hud').textContent = `${(view.lat / D2R).toFixed(3)}°, ${(view.lng / D2R).toFixed(3)}° · ${altitude > 2 ? `${Math.round(altitude)} km` : `${Math.round(altitude * 1000)} m`} above the surface`;
+    $('hud').textContent = mode === 'stargaze'
+      ? `${(view.lat / D2R).toFixed(3)}°, ${(view.lng / D2R).toFixed(3)}° · az ${degrees(skyView.azimuth < 0 ? skyView.azimuth + 2 * Math.PI : skyView.azimuth).toFixed(1)}° · alt ${degrees(skyView.altitude).toFixed(1)}° · ${observationDate().toISOString().slice(0, 16).replace('T', ' ')} UTC`
+      : `${(view.lat / D2R).toFixed(3)}°, ${(view.lng / D2R).toFixed(3)}° · ${altitude > 2 ? `${Math.round(altitude)} km` : `${Math.round(altitude * 1000)} m`} above the surface`;
   }
 });
