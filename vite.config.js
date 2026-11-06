@@ -2,7 +2,7 @@
 import { defineConfig } from 'vite';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
-const appBaseUrl = '/earthviz/';
+const appBaseUrl = '/';
 const cesiumBaseUrl = 'cesiumStatic';
 const cesiumWorkers = [
   'node_modules/@cesium/engine/Build/Workers/combineGeometry.js',

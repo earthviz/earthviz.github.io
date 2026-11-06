@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open the local URL Vite prints (the app is served under `/earthviz/`). `npm run build` creates the production bundle in `dist/`; `npm run preview` serves it.
+Open the local URL Vite prints (the app is served from `/`). `npm run build` creates the production bundle in `dist/`; `npm run preview` serves it.
 
 Pushes to `master` deploy to GitHub Pages through `.github/workflows/deploy.yml`.
 
