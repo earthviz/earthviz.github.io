@@ -51,6 +51,7 @@ import {
   installGlobeTilePriority,
   usesNearestPriority,
 } from './cesium/tile-priority.js';
+import { normalizePlace, privacyFetch, readJson } from './security.js';
 
 const $ = id => document.getElementById(id);
 const D2R = Math.PI / 180;
@@ -358,11 +359,22 @@ function setCredit() {
   $('credit-label').textContent = `© ${provider} · Mapzen · OSM${showsOpenFreeMap ? ' · OpenFreeMap' : ''} ↗`;
   const imageryCredit = key === 'gibs'
     ? 'NASA EOSDIS GIBS · MODIS Terra and HLS Landsat/Sentinel'
-    : EXPLORE_IMAGERY[key].credit;
-  const openFreeMapCredit = showsOpenFreeMap
-    ? ' · Vector detail: <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> © OpenMapTiles · Data from © OpenStreetMap contributors'
-    : '';
-  $('credit').innerHTML = `Heights: Mapzen Terrarium (AWS) · ${imageryCredit}${openFreeMapCredit} · Sun/Moon events: <a href="https://aa.usno.navy.mil/data/api" target="_blank" rel="noopener">USNO Astronomical Applications</a> · Stars: Yale Bright Star Catalogue (BSC5) · Search: © OpenStreetMap contributors`;
+    : (EXPLORE_IMAGERY[key] ?? EXPLORE_IMAGERY.eox).credit;
+  const credit = $('credit');
+  const externalLink = (label, href) => {
+    const link = document.createElement('a');
+    link.textContent = label;
+    link.href = href;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    return link;
+  };
+  credit.replaceChildren(document.createTextNode(`Heights: Mapzen Terrarium (AWS) · ${imageryCredit}`));
+  if (showsOpenFreeMap) {
+    credit.append(' · Vector detail: ', externalLink('OpenFreeMap', 'https://openfreemap.org/'), ' © OpenMapTiles · Data from © OpenStreetMap contributors');
+  }
+  credit.append(' · Sun/Moon events: ', externalLink('USNO Astronomical Applications', 'https://aa.usno.navy.mil/data/api'), ' · Stars: Yale Bright Star Catalogue (BSC5) · Search: © OpenStreetMap contributors');
+  $('esri-attribution').hidden = mode !== 'explore' || key !== 'esri';
 }
 
 function refreshImagery() {
@@ -473,9 +485,11 @@ async function loadDailyEvents(context) {
   const requestController = riseSetController;
   const timeout = setTimeout(() => requestController.abort(), 10_000);
   try {
-    const response = await fetch(usnoOneDayUrl(date, latitude, longitude), { signal: requestController.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const result = await response.json();
+    const response = await privacyFetch(usnoOneDayUrl(date, latitude, longitude), {
+      signal: requestController.signal,
+      headers: { Accept: 'application/json' },
+    });
+    const result = await readJson(response, 128_000);
     if (result.error || !result.properties?.data) throw new Error(result.error || 'Invalid USNO response');
     const events = { ...result.properties.data, polarState: fallback.polarState, apiversion: result.apiversion, source: 'usno' };
     riseSetCache.set(context, events);
@@ -648,9 +662,10 @@ function updatePollutionFilter() {
 
 async function loadStarCatalog() {
   try {
-    const response = await fetch(BSC5_URL);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    starCatalog = await response.json();
+    const response = await privacyFetch(BSC5_URL, { headers: { Accept: 'application/json' } });
+    const catalog = await readJson(response, 5_000_000);
+    if (!Array.isArray(catalog) || catalog.length > 10_000) throw new Error('Invalid star catalogue');
+    starCatalog = catalog.filter(star => star && typeof star === 'object');
     starPoints = scene.primitives.add(new PointPrimitiveCollection());
     for (let i = 0; i < starCatalog.length; i += 1) {
       const magnitude = Number.parseFloat(starCatalog[i].Vmag);
@@ -755,7 +770,13 @@ function renderSpacetimeDays() {
     button.dataset.date = iso;
     button.setAttribute('role', 'option');
     button.setAttribute('aria-selected', String(day === selectedDay));
-    button.innerHTML = `<small>${date.toLocaleDateString(undefined, { timeZone: 'UTC', weekday: 'short' })}</small><strong>${date.getUTCDate()}</strong><span>${date.toLocaleDateString(undefined, { timeZone: 'UTC', month: 'short' })}</span>`;
+    const weekday = document.createElement('small');
+    const dayOfMonth = document.createElement('strong');
+    const month = document.createElement('span');
+    weekday.textContent = date.toLocaleDateString(undefined, { timeZone: 'UTC', weekday: 'short' });
+    dayOfMonth.textContent = String(date.getUTCDate());
+    month.textContent = date.toLocaleDateString(undefined, { timeZone: 'UTC', month: 'short' });
+    button.append(weekday, dayOfMonth, month);
     button.onclick = () => setSpacetimeDate(iso);
     $('spacetime-days').append(button);
   }
@@ -890,28 +911,38 @@ $('spacetime-minimize').onclick = () => {
 const geocodeCache = new Map();
 let lastGeocodeRequest = 0;
 async function geocode(query) {
-  const key = query.toLowerCase();
+  const safeQuery = query.trim().slice(0, 160);
+  const key = safeQuery.toLowerCase();
   if (geocodeCache.has(key)) return geocodeCache.get(key);
   const wait = lastGeocodeRequest + 1100 - Date.now();
   if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
   lastGeocodeRequest = Date.now();
   let results = [];
   try {
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&q=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(10_000) });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    results = (await response.json()).map(hit => ({ name: hit.display_name, lat: +hit.lat, lng: +hit.lon }));
+    const response = await privacyFetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&q=${encodeURIComponent(safeQuery)}`, {
+      signal: AbortSignal.timeout(10_000),
+      headers: { Accept: 'application/json' },
+    });
+    const data = await readJson(response);
+    results = (Array.isArray(data) ? data : [])
+      .map(hit => normalizePlace({ name: hit.display_name, lat: hit.lat, lng: hit.lon }))
+      .filter(Boolean)
+      .slice(0, 6);
   } catch (error) {
     console.warn('Nominatim failed:', error);
   }
   if (!results.length) {
     try {
-      const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=6&language=en&format=json&name=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(10_000) });
-      const data = await response.json();
-      results = (data.results || []).map(hit => ({
+      const response = await privacyFetch(`https://geocoding-api.open-meteo.com/v1/search?count=6&language=en&format=json&name=${encodeURIComponent(safeQuery)}`, {
+        signal: AbortSignal.timeout(10_000),
+        headers: { Accept: 'application/json' },
+      });
+      const data = await readJson(response);
+      results = (Array.isArray(data.results) ? data.results : []).map(hit => normalizePlace({
         name: [hit.name, hit.admin1, hit.country].filter(Boolean).join(', '),
         lat: hit.latitude,
         lng: hit.longitude,
-      }));
+      })).filter(Boolean).slice(0, 6);
     } catch (error) {
       console.warn('Open-Meteo geocoding failed:', error);
     }

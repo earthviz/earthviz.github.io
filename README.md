@@ -13,6 +13,12 @@ Open the local URL Vite prints (the app is served from `/`). `npm run build` cre
 
 Pushes to `master` deploy to GitHub Pages through `.github/workflows/deploy.yml`.
 
+## Security and privacy
+
+Earthviz accepts no uploads, executes no downloaded code, and stores no user data. Search text is sent only over HTTPS to OpenStreetMap Nominatim or Open-Meteo; map coordinates and tile identifiers are sent to the selected mapping providers as required to render the view. Requests omit cookies and referrer information, third-party structured responses are size-bounded and validated, and remote text is inserted with safe DOM APIs rather than interpreted as HTML.
+
+The app ships a restrictive Content Security Policy that permits requests only to the documented data providers, blocks plugins, frames, and mixed HTTP content, and limits scripts to the application origin. Vite development and preview servers also send anti-clickjacking, MIME-sniffing, permissions, referrer, and HSTS headers. GitHub Pages provides HTTPS transport for the production site; keep **Enforce HTTPS** enabled for any custom domain. If deploying behind another host or CDN, configure it to send the same headers from `vite.config.js`, since HTML `<meta>` policies cannot provide `frame-ancestors`, HSTS, or all response-level protections.
+
 ## Modes
 
 - **Explore**: terrain globe with Sentinel-2 cloudless (EOX) or Esri World Imagery.
@@ -76,6 +82,10 @@ Cesium draws the Sun, atmosphere, dynamic Sun lighting, and the globe-view Moon 
 - Stars: Yale Bright Star Catalogue, 5th edition (`bsc5.json`)
 - Sun and Moon daily events: U.S. Naval Observatory Astronomical Applications API, with an offline solar fallback
 - Search: OpenStreetMap Nominatim, with Open-Meteo geocoding as a fallback
+
+### Esri World Imagery use
+
+Esri World Imagery is an optional, non-default layer for interactive, non-commercial viewing only. Keep its source attribution and terms links visible. Do not add offline tile persistence, export, scraping, bulk download, redistribution, automated extraction, or commercial use without obtaining the appropriate rights from Esri and any applicable imagery contributor. Review the [World Imagery item terms](https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9) and [Esri Web Site and Service Terms of Use](https://www.esri.com/en-us/legal/terms/web-site-service) before deploying changes that affect this layer.
 
 ## Bundle
 

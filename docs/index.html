@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; frame-src 'none'; form-action 'self'; upgrade-insecure-requests; block-all-mixed-content">
+    <meta name="theme-color" content="#10191c">
+    <meta name="description" content="Learn how to explore Earth, browse imagery through time, and stargaze with Earthviz.">
+    <title>How To Use · Earthviz</title>
+    <link rel="icon" href="/earthviz-logo.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" sizes="180x180">
+    <link rel="stylesheet" href="/src/docs.css">
+  </head>
+  <body>
+    <header class="docs-header">
+      <a class="docs-brand" href="/" aria-label="Return to Earthviz"><img src="/earthviz-logo.svg" alt=""><span>earthviz</span></a>
+      <nav class="docs-nav" aria-label="Documentation"><a href="/docs/" aria-current="page">How To Use</a><a href="/disclaimer/">Disclaimer</a><a href="/">Open globe ↗</a></nav>
+    </header>
+    <div class="docs-layout">
+      <aside class="docs-toc" aria-label="On this page">
+        <strong>On this page</strong>
+        <a href="#start">Getting started</a>
+        <a href="#navigation">Move around</a>
+        <a href="#search">Find a place</a>
+        <a href="#modes">Viewing modes</a>
+        <a href="#controls">Map controls</a>
+        <a href="#keyboard">Keyboard</a>
+        <a href="#troubleshooting">Troubleshooting</a>
+      </aside>
+      <main class="docs-content">
+        <p class="eyebrow">Documentation</p>
+        <h1>How To Use Earthviz</h1>
+        <p class="lede">Explore the planet in 3D, revisit Earth imagery from a chosen date, or look outward at the sky from any location.</p>
+
+        <section id="start">
+          <h2>Getting started</h2>
+          <ol>
+            <li>Open the globe and drag anywhere on Earth to begin exploring.</li>
+            <li>Search for a place or enter coordinates in the bar at the top.</li>
+            <li>Choose <strong>Explore</strong>, <strong>Spacetime</strong>, or <strong>Stargaze</strong> to change what you are viewing.</li>
+            <li>Open the panels on the left to adjust imagery, terrain, human elements, or sky conditions.</li>
+          </ol>
+          <div class="callout">Earthviz streams imagery and terrain as you move. A newly visited area may take a moment to sharpen, especially at high detail.</div>
+        </section>
+
+        <section id="navigation">
+          <h2>Move around the globe</h2>
+          <ul>
+            <li><strong>Pan:</strong> left-drag across the globe.</li>
+            <li><strong>Orbit:</strong> right-drag around the selected surface point.</li>
+            <li><strong>Free-look:</strong> middle-drag, or hold <kbd>Shift</kbd> while dragging.</li>
+            <li><strong>Zoom:</strong> use the mouse wheel, trackpad, or the <strong>+</strong> and <strong>−</strong> buttons.</li>
+            <li><strong>Reset:</strong> select the circular home control to return to the full globe.</li>
+            <li><strong>Face north:</strong> select the compass control.</li>
+          </ul>
+          <p>Select <strong>Focus</strong> in the lower-right controls to hide most of the interface. Select it again to restore the controls.</p>
+        </section>
+
+        <section id="search">
+          <h2>Find a place</h2>
+          <p>Select the search bar and type a city, landmark, or location. Suggestions appear as you type; use <kbd>↑</kbd> and <kbd>↓</kbd> to move through them and <kbd>Enter</kbd> to choose one.</p>
+          <p>You can also enter decimal coordinates as <strong>latitude, longitude</strong>, for example <code>27.9881, 86.9250</code>. Press <kbd>Ctrl</kbd> + <kbd>K</kbd> or <kbd>⌘</kbd> + <kbd>K</kbd> to focus search from anywhere.</p>
+        </section>
+
+        <section id="modes">
+          <h2>Choose a viewing mode</h2>
+          <div class="mode-grid">
+            <article class="mode-card"><strong>Explore</strong><p>Browse current satellite basemaps, terrain relief, roads, buildings, and live lighting.</p></article>
+            <article class="mode-card"><strong>Spacetime</strong><p>Choose a date and inspect available NASA Earth-observation imagery for that day.</p></article>
+            <article class="mode-card"><strong>Stargaze</strong><p>Look at the simulated sky from the selected location, date, and UTC time.</p></article>
+          </div>
+
+          <h3>Explore</h3>
+          <p>Switch between Sentinel-2 natural colour and Esri World Imagery in <strong>Tiles</strong>. Terrain controls adjust surface detail, maximum zoom, relief, and mesh density. Roads and 3D buildings are optional and appear only when you are close enough to the ground.</p>
+
+          <h3>Spacetime</h3>
+          <p>Choose a date in the timeline and select <strong>View</strong>. Coverage depends on the satellites and imagery available for that day; black or empty areas can be genuine gaps. The lighting controls follow the selected date.</p>
+
+          <h3>Stargaze</h3>
+          <p>Drag to look around the sky and select a star to identify it. Set the UTC date and time in <strong>Sky conditions</strong>, or choose <strong>Today</strong> to return to the current time. The light-pollution control changes the faintest visible stars.</p>
+        </section>
+
+        <section id="controls">
+          <h2>Map and sky controls</h2>
+          <ul>
+            <li><strong>Tiles:</strong> select imagery and decide which visible tiles load first.</li>
+            <li><strong>Terrain:</strong> balance visual detail against loading and rendering cost.</li>
+            <li><strong>Human elements:</strong> show roads or 3D buildings near the surface.</li>
+            <li><strong>Sky conditions:</strong> change observation time, animate day and night, inspect Sun and Moon events, and simulate light pollution.</li>
+          </ul>
+          <p>Higher detail, finer terrain meshes, buildings, and roads can all increase loading time and graphics usage. If interaction becomes slow, reduce terrain detail or disable optional human elements.</p>
+        </section>
+
+        <section id="keyboard">
+          <h2>Keyboard controls</h2>
+          <ul>
+            <li><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> move the camera.</li>
+            <li><kbd>Q</kbd> and <kbd>E</kbd> move down and up.</li>
+            <li>Arrow keys change the viewing direction.</li>
+            <li><kbd>+</kbd> and <kbd>−</kbd> zoom.</li>
+            <li>Hold <kbd>Shift</kbd> for faster keyboard movement.</li>
+            <li><kbd>Esc</kbd> closes search suggestions and open panels.</li>
+          </ul>
+        </section>
+
+        <section id="troubleshooting">
+          <h2>Troubleshooting</h2>
+          <h3>The map is blurry or still loading</h3>
+          <p>Pause movement briefly so high-priority tiles can finish. A slower connection, a high detail setting, or rapid travel between distant locations can increase loading time.</p>
+          <h3>A layer is missing</h3>
+          <p>Roads and buildings only appear near the ground and are hidden in Stargaze. Historical imagery can contain real coverage gaps. Try zooming out, changing date or imagery source, or returning to Explore.</p>
+          <h3>The scene is dark</h3>
+          <p>Lighting follows the active UTC time or selected historical date. Open Sky conditions, choose Today, or adjust the time slider.</p>
+        </section>
+
+        <footer class="docs-footer"><span>Earthviz documentation</span><span><a href="/disclaimer/">Read the project disclaimer</a> · <a href="/">Return to Earthviz</a></span></footer>
+      </main>
+    </div>
+  </body>
+</html>

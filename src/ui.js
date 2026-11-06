@@ -1,4 +1,5 @@
 import { parseCoordinates, formatCoordinates } from './coordinates.js';
+import { normalizePlace, privacyFetch, readJson } from './security.js';
 
 const $ = id => document.getElementById(id);
 const destinations = [
@@ -94,14 +95,16 @@ export function setupUI({ search, flyTo, zoom, home, north }) {
     input.setAttribute('aria-busy', 'true');
     try {
       // Nominatim is only used for explicit submissions, never autocomplete.
-      const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=6&language=en&format=json&name=${encodeURIComponent(query)}`, { signal: requestController.signal });
-      if (!response.ok) throw new Error('Search unavailable');
-      const data = await response.json();
+      const response = await privacyFetch(`https://geocoding-api.open-meteo.com/v1/search?count=6&language=en&format=json&name=${encodeURIComponent(query)}`, {
+        signal: requestController.signal,
+        headers: { Accept: 'application/json' },
+      });
+      const data = await readJson(response);
       if (current !== revision) return;
-      const hits = (data.results || []).map(hit => ({
+      const hits = (Array.isArray(data.results) ? data.results : []).map(hit => normalizePlace({
         name: [hit.name, hit.admin1, hit.country].filter(Boolean).join(', '),
         lat: hit.latitude, lng: hit.longitude,
-      }));
+      })).filter(Boolean);
       const local = destinations.filter(hit => hit.name.toLowerCase().includes(query.toLowerCase()));
       const all = [...local, ...hits].slice(0, 6);
       show(all, all.length ? 'Places to explore' : 'No suggestions. Press Explore to search landmarks.');

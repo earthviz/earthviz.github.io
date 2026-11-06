@@ -3,14 +3,22 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com; connect-src 'self' https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com https://tiles.openfreemap.org https://aa.usno.navy.mil https://nominatim.openstreetmap.org https://geocoding-api.open-meteo.com; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; frame-src 'none'; form-action 'self'; upgrade-insecure-requests; block-all-mixed-content">
     <meta name="theme-color" content="#10191c">
     <meta name="description" content="Explore our planet in 3D. Discover places, terrain, and the changing light of Earth.">
     <title>Earthviz · Explore our planet</title>
+    <link rel="icon" href="/earthviz-logo.svg" type="image/svg+xml">
+    <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+    <link rel="icon" href="/icons/favicon-16.png" sizes="16x16" type="image/png">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" sizes="180x180">
+    <link rel="manifest" href="/site.webmanifest">
     <link rel="stylesheet" href="/src/styles.css">
   </head>
   <body class="explore-mode">
     <header class="topbar">
-      <a class="brand" href="/" aria-label="earthviz home"><span class="brand-mark" aria-hidden="true"></span><span>earthviz</span></a>
+      <a class="brand" href="/" aria-label="earthviz home"><img class="brand-mark" src="/earthviz-logo.svg" alt=""><span>earthviz</span></a>
       <div class="mode-switch" role="group" aria-label="Viewing mode">
         <button id="mode-explore" class="mode-button active" type="button" aria-pressed="true">Explore</button>
         <button id="mode-spacetime" class="mode-button" type="button" aria-pressed="false"><span aria-hidden="true">◷</span> Spacetime</button>
@@ -19,7 +27,7 @@
       <div class="search-shell">
         <form id="sf" role="search" autocomplete="off">
           <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
-          <input id="q" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="hits" placeholder="Search places or coordinates" aria-label="Search places or latitude, longitude">
+          <input id="q" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="hits" maxlength="160" spellcheck="false" autocapitalize="none" placeholder="Search places or coordinates" aria-label="Search places or latitude, longitude">
           <button id="clear-search" type="button" aria-label="Clear search" title="Clear search" hidden>×</button>
           <kbd class="search-shortcut">Ctrl K</kbd>
           <button id="sb" type="submit">Go <span aria-hidden="true">↗</span></button>
@@ -37,7 +45,8 @@
         <summary><span><strong>Tiles</strong><small>Imagery and loading</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
         <div class="panel-content">
           <label for="src">Tile source</label>
-          <select id="src"><option value="eox">Sentinel-2 · Natural color</option><option value="esri">Esri · World Imagery</option></select>
+          <select id="src"><option value="eox">Sentinel-2 · Natural color</option><option value="esri">Esri · World Imagery · non-commercial</option></select>
+          <p class="panel-note esri-use-note">Esri imagery is for interactive, non-commercial viewing only. No export, scraping, bulk download, or redistribution. <a href="https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9" target="_blank" rel="noopener">Layer terms ↗</a></p>
           <label for="tile-priority">Tile loading priority</label>
           <select id="tile-priority" aria-describedby="tile-priority-note"><option value="adaptive" selected>Adaptive</option><option value="view-center">View center</option><option value="nearest">Nearest terrain</option></select>
           <p id="tile-priority-note" class="panel-note">Adaptive prioritizes nearby tiles while moving, then resolves the view center.</p>
@@ -126,9 +135,10 @@
     </nav>
 
     <footer class="footer">
-      <details class="help"><summary>ⓘ <span>How to explore</span></summary><div>Left-drag to pan · Right-drag to orbit · Scroll to zoom<br>Middle-drag or Shift-drag to free-look<br>WASD to move · Q/E down/up · Arrow keys to look · + / − to zoom<br>Hold Shift for faster keyboard movement<br>In Stargaze, drag to look and click a star to identify it</div></details>
+      <nav class="footer-links" aria-label="Project information"><a href="/docs/">How To Use</a><a href="/disclaimer/">Disclaimer</a></nav>
       <details class="credits"><summary id="credit-label">Map data & credits ↗</summary><div id="credit"></div></details>
     </footer>
+    <div id="esri-attribution" class="esri-attribution" hidden>Sources: <a href="https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9" target="_blank" rel="noopener">Esri, Vantor, Earthstar Geographics, and the GIS User Community</a> · <a href="https://www.esri.com/en-us/legal/terms/web-site-service" target="_blank" rel="noopener">Terms</a></div>
     <script type="module" src="/src/cesium-main.js"></script>
   </body>
 </html>

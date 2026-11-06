@@ -32,6 +32,7 @@ import {
   tileWindow,
 } from './openfreemap-geometry.js';
 import { forEachSliced } from './time-slice.js';
+import { privacyFetch, readArrayBuffer } from '../security.js';
 
 const TILE_URL = 'https://tiles.openfreemap.org/planet/latest/{z}/{x}/{y}.pbf';
 const MAX_CACHE_TILES = 36;
@@ -41,6 +42,7 @@ const MAX_DECODED_TILES = 8;
 const TERRAIN_SAMPLE_LEVEL = 13;
 const REQUEST_TIMEOUT = 15_000;
 const RETRY_DELAY = 20_000;
+const MAX_TILE_BYTES = 2_000_000;
 const BUILDING_BASE_OFFSET = 0.6;
 // Opaque buildings are far cheaper to fill than blended ones. Flip this to
 // bring the old 44% glass look back.
@@ -161,9 +163,11 @@ class TileDataCache {
     entry.controller = new AbortController();
     const timeout = setTimeout(() => entry.controller.abort(), REQUEST_TIMEOUT);
     try {
-      const response = await fetch(tileUrl(entry.tile), { signal: entry.controller.signal });
-      if (!response.ok) throw new Error(`OpenFreeMap tile ${entry.key}: HTTP ${response.status}`);
-      const buffer = await response.arrayBuffer();
+      const response = await privacyFetch(tileUrl(entry.tile), {
+        signal: entry.controller.signal,
+        headers: { Accept: 'application/vnd.mapbox-vector-tile, application/x-protobuf, application/octet-stream' },
+      });
+      const buffer = await readArrayBuffer(response, MAX_TILE_BYTES);
       entry.decoded = decodeMVT(buffer);
       entry.state = 'done';
       entry.resolve(entry.decoded);

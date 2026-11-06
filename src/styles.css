@@ -51,8 +51,7 @@ canvas:active { cursor: grabbing; }
   backdrop-filter: blur(22px) saturate(120%);
 }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-size: 16px; font-weight: 650; letter-spacing: -.2px; }
-.brand-mark { position: relative; width: 27px; height: 27px; border: 1px solid rgba(185, 216, 122, .75); border-radius: 50%; }
-.brand-mark::before { content: ""; position: absolute; inset: 5px; border: 1px solid rgba(185, 216, 122, .65); border-radius: 50%; }
+.brand-mark { display: block; width: 27px; height: 27px; flex: 0 0 auto; }
 
 .search-shell { position: relative; grid-column: 2; grid-row: 1; width: 100%; min-width: 0; }
 #sf { display: flex; align-items: center; height: 46px; gap: 10px; padding: 0 5px 0 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); transition: border-color .15s, background .15s; }
@@ -119,6 +118,8 @@ input[type="range"] { width: 100%; height: 16px; margin: 0; cursor: pointer; acc
 .switch-row input:checked { background: #76944d; }
 .switch-row input:checked::before { transform: translateX(12px); }
 .panel-note { margin: 0; color: var(--text-faint); font-size: 9px; line-height: 1.5; }
+.panel-note a { color: var(--accent); }
+.esri-use-note { padding: 8px; border: 1px solid var(--border); border-radius: 5px; background: rgba(185, 216, 122, .045); }
 .city-overlay-switch { margin-top: 1px; }
 .overlay-status { margin-top: -6px; color: var(--text-faint); font-size: 8px; }
 .overlay-status[data-kind="loading"] { color: var(--accent); }
@@ -180,7 +181,12 @@ input[type="range"] { width: 100%; height: 16px; margin: 0; cursor: pointer; acc
 .footer summary { list-style: none; }
 .footer details { position: relative; }
 .footer details > div { position: absolute; right: 0; bottom: 24px; width: 280px; padding: 13px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-raised); box-shadow: var(--shadow); color: var(--text-soft); line-height: 1.7; }
-.footer a { color: var(--accent); }
+.footer a { color: inherit; text-decoration: none; }
+.footer a:hover { color: var(--accent); }
+.footer-links { display: flex; gap: 15px; }
+.esri-attribution { position: fixed; z-index: 7; bottom: 29px; left: 16px; max-width: min(620px, calc(100vw - 100px)); padding: 4px 7px; border-radius: 4px; background: rgba(5, 9, 11, .82); color: rgba(220, 229, 226, .8); font-size: 8px; line-height: 1.45; backdrop-filter: blur(10px); }
+.esri-attribution a { color: inherit; }
+.esri-attribution a:hover { color: var(--accent); }
 
 /* Focus and rail states */
 .dock-collapsed .control-dock { width: 52px; }
@@ -220,6 +226,7 @@ input[type="range"] { width: 100%; height: 16px; margin: 0; cursor: pointer; acc
   .navigation { right: 12px; bottom: 16px; }
   .navigation button { width: 36px; height: 36px; }
   .footer { display: none; }
+  .esri-attribution { bottom: 8px; left: 10px; max-width: calc(100vw - 68px); }
   #sky-object.sky-object-card { right: 60px; bottom: 16px; left: 14px; width: auto; }
   .dock-collapsed .control-dock { width: 48px; }
   .dock-collapsed #sky-object.sky-object-card { left: 14px; }

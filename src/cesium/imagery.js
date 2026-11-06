@@ -16,7 +16,9 @@ export const EXPLORE_IMAGERY = {
   esri: {
     maximumLevel: 15,
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    credit: 'Imagery: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+    // Interactive display only. Do not add offline persistence, tile export,
+    // scraping, or bulk download without a separate licence from Esri.
+    credit: 'Sources: Esri, Vantor, Earthstar Geographics, and the GIS User Community',
   },
   eox: {
     maximumLevel: 13,

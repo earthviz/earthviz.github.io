@@ -1,0 +1,69 @@
+:root {
+  color-scheme: dark;
+  --bg: #05090b;
+  --surface: #0d1518;
+  --surface-soft: #121d20;
+  --text: #f2f5f3;
+  --text-soft: #a0acaa;
+  --text-faint: #71807e;
+  --accent: #b9d87a;
+  --border: rgba(220, 235, 230, .13);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; background: var(--bg); }
+body { min-width: 280px; margin: 0; background: radial-gradient(circle at 85% 0%, rgba(185, 216, 122, .08), transparent 28rem), var(--bg); color: var(--text); font-size: 15px; line-height: 1.7; }
+a { color: var(--accent); text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+
+.docs-header { position: sticky; z-index: 10; top: 0; display: flex; height: 68px; align-items: center; justify-content: space-between; gap: 24px; padding: 0 max(22px, calc((100vw - 1080px) / 2)); border-bottom: 1px solid var(--border); background: rgba(6, 11, 13, .9); backdrop-filter: blur(20px); }
+.docs-brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 16px; font-weight: 650; text-decoration: none; }
+.docs-brand img { width: 27px; height: 27px; }
+.docs-nav { display: flex; align-items: center; gap: 20px; font-size: 12px; }
+.docs-nav a { color: var(--text-soft); text-decoration: none; }
+.docs-nav a[aria-current="page"], .docs-nav a:hover { color: var(--accent); }
+
+.docs-layout { display: grid; width: min(1080px, calc(100% - 44px)); margin: 0 auto; grid-template-columns: 210px minmax(0, 720px); gap: 64px; padding: 64px 0 90px; }
+.docs-toc { position: sticky; top: 100px; align-self: start; }
+.docs-toc strong { display: block; margin-bottom: 12px; color: var(--text-faint); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; }
+.docs-toc a { display: block; padding: 5px 0; color: var(--text-soft); font-size: 12px; text-decoration: none; }
+.docs-toc a:hover { color: var(--accent); }
+.docs-content { min-width: 0; }
+.eyebrow { margin: 0 0 12px; color: var(--accent); font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+h1 { max-width: 680px; margin: 0; font-size: clamp(38px, 6vw, 66px); font-weight: 620; letter-spacing: -.045em; line-height: 1.04; }
+.lede { max-width: 650px; margin: 24px 0 56px; color: var(--text-soft); font-size: 18px; line-height: 1.65; }
+section { padding: 38px 0; border-top: 1px solid var(--border); scroll-margin-top: 88px; }
+h2 { margin: 0 0 18px; font-size: 25px; font-weight: 610; letter-spacing: -.02em; }
+h3 { margin: 28px 0 8px; font-size: 15px; font-weight: 650; }
+p { margin: 0 0 16px; color: var(--text-soft); }
+ul, ol { margin: 12px 0 18px; padding-left: 22px; color: var(--text-soft); }
+li { margin: 7px 0; padding-left: 4px; }
+strong { color: var(--text); }
+kbd { padding: 2px 6px; border: 1px solid var(--border); border-bottom-color: rgba(220, 235, 230, .28); border-radius: 4px; background: var(--surface-soft); color: var(--text); font: 11px/1.5 inherit; white-space: nowrap; }
+.mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 20px 0; }
+.mode-card { padding: 18px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.mode-card strong { display: block; margin-bottom: 7px; }
+.mode-card p { margin: 0; font-size: 12px; }
+.callout { margin: 22px 0; padding: 17px 19px; border-left: 2px solid var(--accent); background: rgba(185, 216, 122, .06); color: var(--text-soft); }
+.disclaimer-statement { margin: 28px 0 44px; padding: 22px 24px; border: 1px solid rgba(185, 216, 122, .3); border-radius: 9px; background: rgba(185, 216, 122, .06); color: var(--text); font-size: clamp(17px, 2.4vw, 21px); font-weight: 580; line-height: 1.55; }
+.docs-footer { display: flex; justify-content: space-between; gap: 20px; padding-top: 36px; border-top: 1px solid var(--border); color: var(--text-faint); font-size: 11px; }
+
+@media (max-width: 760px) {
+  .docs-header { height: 60px; padding: 0 16px; }
+  .docs-nav { gap: 12px; font-size: 11px; }
+  .docs-layout { display: block; width: min(100% - 32px, 680px); padding: 44px 0 70px; }
+  .docs-toc { display: none; }
+  .mode-grid { grid-template-columns: 1fr; }
+  .lede { margin-bottom: 42px; font-size: 16px; }
+}
+
+@media (max-width: 420px) {
+  .docs-brand span { display: none; }
+  .docs-nav { gap: 10px; }
+  .docs-footer { flex-direction: column; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
