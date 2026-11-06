@@ -181,6 +181,10 @@ input[type="range"] { width: 100%; height: 16px; margin: 0; cursor: pointer; acc
 .footer summary { list-style: none; }
 .footer details { position: relative; }
 .footer details > div { position: absolute; right: 0; bottom: 24px; width: 280px; padding: 13px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-raised); box-shadow: var(--shadow); color: var(--text-soft); line-height: 1.7; }
+.footer .about > div { width: 330px; }
+.footer .about h1 { margin: 0 0 7px; color: var(--text); font-size: 13px; font-weight: 650; }
+.footer .about p { margin: 0; }
+.footer .about p + p { margin-top: 7px; }
 .footer a { color: inherit; text-decoration: none; }
 .footer a:hover { color: var(--accent); }
 .footer-links { display: flex; gap: 15px; }
