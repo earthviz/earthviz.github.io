@@ -12,8 +12,7 @@
   },
   "dependencies": {
     "@cesium/core": "0.1.0",
-    "@cesium/engine": "26.4.0",
-    "three": "^0.160.0"
+    "@cesium/engine": "26.4.0"
   },
   "devDependencies": {
     "vite": "^6.0.0",
