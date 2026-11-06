@@ -171,17 +171,15 @@ export function setupUI({ search, flyTo, zoom, home, north }) {
   $('zoom-out').onclick = () => zoom(1 / 0.7);
   $('home').onclick = () => { close(); home(); };
   $('north').onclick = north;
-  $('ui-toggle').onclick = () => {
+  const toggleUi = () => {
     const minimal = document.body.classList.toggle('ui-minimal');
     $('ui-toggle').setAttribute('aria-pressed', String(minimal));
     $('ui-toggle').textContent = minimal ? 'Show UI' : 'Focus';
     $('ui-toggle').title = minimal ? 'Show interface' : 'Focus on the world';
   };
+  $('ui-toggle').onclick = toggleUi;
   const labels = ['Minimal', 'Light', 'Moderate', 'Balanced', 'High', 'Maximum'];
   $('det').addEventListener('input', () => { $('detail-value').textContent = labels[+$('det').value - 1]; });
   $('terrain-zoom').addEventListener('input', () => { $('terrain-zoom-value').textContent = `z${$('terrain-zoom').value}`; });
   $('ex').addEventListener('input', () => { $('ex-value').textContent = `${(+$('ex').value).toFixed(1)}×`; });
-  document.querySelectorAll('.tool-panel').forEach(panel => panel.addEventListener('toggle', () => {
-    if (panel.open && innerWidth <= 640) document.querySelectorAll('.tool-panel').forEach(other => { if (other !== panel) other.open = false; });
-  }));
 }

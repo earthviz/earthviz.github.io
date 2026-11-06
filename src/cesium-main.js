@@ -9,20 +9,22 @@ import {
   JulianDate,
 } from '@cesium/core';
 import {
+  BillboardCollection,
   CameraEventType,
   CesiumWidget,
-  DirectionalLight,
   KeyboardEventModifier,
   PointPrimitiveCollection,
   SunLight,
 } from '@cesium/engine';
 import { setupUI } from './ui.js';
 import {
+  apparentAngularDiameter,
   calculateSolarEvents,
   catalogEquatorial,
   degrees,
   equatorialToHorizontal,
   greenwichMeanSiderealTime,
+  moonEquatorial,
   starRgb,
   sunEquatorial,
 } from './astronomy.js';
@@ -45,6 +47,10 @@ import { apparentSolarAltitude, horizonDip, solarPhase } from './sky-model.js';
 import { TerrariumTerrainProvider } from './cesium/terrarium-terrain-provider.js';
 import { EXPLORE_IMAGERY, ImageryController } from './cesium/imagery.js';
 import { OpenFreeMapOverlayController } from './cesium/openfreemap-overlay.js';
+import {
+  installGlobeTilePriority,
+  usesNearestPriority,
+} from './cesium/tile-priority.js';
 
 const $ = id => document.getElementById(id);
 const D2R = Math.PI / 180;
@@ -52,8 +58,9 @@ const R2D = 180 / Math.PI;
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
 const wrapRadians = value => ((value + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
 const DETAIL_ERRORS = [8, 5, 3.25, 2, 1.25, 0.75];
-const INITIAL_VIEW = { lat: 20 * D2R, lng: 0, height: 10_000_000, heading: 0, pitch: -70 * D2R };
+const INITIAL_VIEW = { lat: 20 * D2R, lng: 0, height: 10_000_000, heading: 0, pitch: -90 * D2R };
 const LOCAL_HEIGHT = 16_000;
+const GLOBE_CENTERING_HEIGHT = 2_500_000;
 const STAR_RADIUS = 500_000_000;
 const BSC5_URL = new URL('../bsc5.json', import.meta.url);
 
@@ -64,6 +71,11 @@ let focus = { lat: INITIAL_VIEW.lat, lng: INITIAL_VIEW.lng };
 let pendingTiles = 0;
 let frame = 0;
 let lastFrameTime = performance.now();
+let adaptiveNearestUntil = 0;
+let adaptiveNearest = false;
+const previousPriorityPosition = new Cartesian3();
+const previousPriorityDirection = new Cartesian3();
+let hasPreviousPriorityCamera = false;
 let localSun = { trueAltitude: 0, apparentAltitude: 0, horizonDip: 0, observerAltitude: 0 };
 let atmosphereReadout = '';
 let skyAzimuth = 0;
@@ -76,6 +88,9 @@ let starPoints = null;
 let selectedStar = -1;
 let starEpochDay = '';
 let starStatus = 'Loading the Bright Star Catalogue…';
+let lastLiveTimeSecond = -1;
+let moonBillboard = null;
+let moonTextureSignature = '';
 const overlayLoading = { buildings: false, roads: false };
 
 const globeContainer = document.createElement('div');
@@ -108,11 +123,27 @@ const cityOverlay = new OpenFreeMapOverlayController({
     $(`overlay-${layer}-status`).textContent = text;
   },
 });
+const tilePriorityPolicy = () => ({ mode: $('tile-priority').value, adaptiveNearest });
+installGlobeTilePriority(globe, tilePriorityPolicy);
 const naturalSun = new SunLight({ intensity: 2.7 });
-const daylightSun = new DirectionalLight({ direction: new Cartesian3(0, 0, -1), intensity: 2.7 });
+scene.light = naturalSun;
 const centerPixel = new Cartesian2();
 const centerCartographic = new Cartographic();
 const localUp = new Cartesian3();
+const centeredPosition = new Cartesian3();
+const centeredDirection = new Cartesian3();
+const centeredUp = new Cartesian3();
+let previousCenteringHeight = INITIAL_VIEW.height;
+
+// Cesium's physical Moon is easy to lose against a black, skybox-free
+// stargazing background. A screen-sized phase disc keeps its real angular
+// position and apparent diameter legible at ordinary fields of view.
+const moonBillboards = scene.primitives.add(new BillboardCollection({ scene }));
+moonBillboard = moonBillboards.add({
+  position: Cartesian3.fromRadians(0, 0, STAR_RADIUS),
+  show: false,
+  id: { kind: 'moon' },
+});
 
 globe.maximumScreenSpaceError = DETAIL_ERRORS[+$('det').value - 1];
 globe.tileCacheSize = 320;
@@ -228,6 +259,42 @@ function cameraHeight() {
   return Math.max(0, camera.positionCartographic?.height || 0);
 }
 
+function keepGlobeCenteredWhileZoomingOut() {
+  const height = cameraHeight();
+  const zoomingOut = height > previousCenteringHeight * 1.0001;
+  previousCenteringHeight = height;
+  if (mode === 'stargaze' || !zoomingOut || height < GLOBE_CENTERING_HEIGHT) return;
+
+  Cartesian3.clone(camera.positionWC, centeredPosition);
+  Cartesian3.negate(centeredPosition, centeredDirection);
+  Cartesian3.normalize(centeredDirection, centeredDirection);
+  Cartesian3.cross(camera.rightWC, centeredDirection, centeredUp);
+  if (Cartesian3.magnitudeSquared(centeredUp) < 1e-12) return;
+  Cartesian3.normalize(centeredUp, centeredUp);
+  camera.setView({
+    destination: centeredPosition,
+    orientation: { direction: centeredDirection, up: centeredUp },
+  });
+}
+
+function updateAdaptiveTilePriority(now, deltaSeconds) {
+  const position = camera.positionWC;
+  const direction = camera.directionWC;
+  if (hasPreviousPriorityCamera && deltaSeconds > 0) {
+    const positionSpeed = Cartesian3.distance(position, previousPriorityPosition)
+      / Math.max(cameraHeight(), 100) / deltaSeconds;
+    const directionDot = clamp(Cartesian3.dot(direction, previousPriorityDirection), -1, 1);
+    const angularSpeed = Math.acos(directionDot) / deltaSeconds;
+    if (positionSpeed > 0.08 || angularSpeed > 0.12) adaptiveNearestUntil = now + 450;
+  }
+  Cartesian3.clone(position, previousPriorityPosition);
+  Cartesian3.clone(direction, previousPriorityDirection);
+  hasPreviousPriorityCamera = true;
+
+  adaptiveNearest = now < adaptiveNearestUntil;
+  cityOverlay.setNearestPriority(usesNearestPriority($('tile-priority').value, adaptiveNearest));
+}
+
 function setInitialCamera() {
   camera.setView({
     destination: Cartesian3.fromRadians(INITIAL_VIEW.lng, INITIAL_VIEW.lat, INITIAL_VIEW.height),
@@ -270,6 +337,7 @@ function setStargazeCamera() {
     orientation: { heading: skyAzimuth, pitch: skyAltitude, roll: 0 },
   });
   if ('fov' in camera.frustum) camera.frustum.fov = skyFov;
+  updateMoon(observationDate());
 }
 
 function replaceTerrain() {
@@ -316,6 +384,26 @@ function observationDate() {
 function setObservationControls(date) {
   $('sky-date').value = date.toISOString().slice(0, 10);
   $('tod').value = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
+}
+
+function liveTimeEnabled() {
+  return mode !== 'spacetime' && $('live-time').checked;
+}
+
+function syncTimeControlState() {
+  const live = liveTimeEnabled();
+  $('sky-date').disabled = mode === 'spacetime' || live;
+  $('tod').disabled = live;
+}
+
+function syncToCurrentTime(force = false) {
+  if (!liveTimeEnabled()) return;
+  const now = new Date();
+  const second = Math.floor(now.getTime() / 1000);
+  if (!force && second === lastLiveTimeSecond) return;
+  lastLiveTimeSecond = second;
+  setObservationControls(now);
+  updateSun();
 }
 
 function currentRiseSetContext() {
@@ -408,6 +496,63 @@ function scheduleDailyEvents(force = false) {
   riseSetTimer = setTimeout(() => loadDailyEvents(context), force ? 0 : 350);
 }
 
+function createMoonPhaseTexture(illuminatedFraction, waxing) {
+  const size = 128;
+  const canvasTexture = document.createElement('canvas');
+  canvasTexture.width = size;
+  canvasTexture.height = size;
+  const context = canvasTexture.getContext('2d');
+  const pixels = context.createImageData(size, size);
+  const separation = Math.acos(clamp(1 - 2 * illuminatedFraction, -1, 1));
+  const sunX = (waxing ? -1 : 1) * Math.sin(separation);
+  const sunZ = -Math.cos(separation);
+  const radius = size * 0.39;
+  const center = size / 2;
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const nx = (x + 0.5 - center) / radius;
+      const ny = (center - y - 0.5) / radius;
+      const radialSquared = nx * nx + ny * ny;
+      if (radialSquared > 1.04) continue;
+      const edgeAlpha = clamp((1.04 - radialSquared) / 0.04, 0, 1);
+      const nz = Math.sqrt(Math.max(0, 1 - radialSquared));
+      const incidence = nx * sunX + nz * sunZ;
+      const maria = 0.91 + 0.06 * Math.sin(nx * 17 + ny * 9) * Math.sin(ny * 21 - nx * 5);
+      const brightness = incidence > 0 ? (0.38 + 0.62 * incidence) * maria : 0.025;
+      const offset = (y * size + x) * 4;
+      pixels.data[offset] = 226 * brightness;
+      pixels.data[offset + 1] = 232 * brightness;
+      pixels.data[offset + 2] = 225 * brightness;
+      pixels.data[offset + 3] = 255 * edgeAlpha;
+    }
+  }
+  context.putImageData(pixels, 0, 0);
+  return canvasTexture;
+}
+
+function updateMoon(date) {
+  if (!moonBillboard) return;
+  const moon = moonEquatorial(date);
+  const sun = sunEquatorial(date);
+  const sidereal = greenwichMeanSiderealTime(date);
+  moonBillboard.position = Cartesian3.fromRadians(moon.ra - sidereal, moon.dec, STAR_RADIUS);
+
+  const waxing = Math.sin(sun.ra - moon.ra) > 0;
+  const signature = `${Math.round(moon.illuminatedFraction * 100)}:${waxing}`;
+  if (signature !== moonTextureSignature) {
+    moonTextureSignature = signature;
+    moonBillboard.image = createMoonPhaseTexture(moon.illuminatedFraction, waxing);
+  }
+
+  const angularDiameter = apparentAngularDiameter(1737.4, moon.distanceKm);
+  const verticalFov = camera.frustum.fovy || camera.frustum.fov || skyFov;
+  const diameterPixels = clamp(angularDiameter / verticalFov * canvas.clientHeight, 14, 64);
+  moonBillboard.width = diameterPixels;
+  moonBillboard.height = diameterPixels;
+  moonBillboard.show = mode === 'stargaze';
+}
+
 function updateStars(date) {
   if (!starCatalog.length || !starPoints) return;
   const day = date.toISOString().slice(0, 10);
@@ -425,6 +570,7 @@ function updateStars(date) {
 function updateSun() {
   const date = observationDate();
   widget.clock.currentTime = JulianDate.fromDate(date);
+  updateMoon(date);
   updateStars(date);
   renderDailyEvents();
   const minutes = Math.round((+$('tod').value || 0) * 60) % 1440;
@@ -445,11 +591,6 @@ function updateEnvironment() {
   const apparentAltitude = apparentSolarAltitude(trueAltitude, density);
   const dip = horizonDip(observerAltitudeKm);
   localSun = { trueAltitude, apparentAltitude, horizonDip: dip, observerAltitude: observerAltitudeKm };
-
-  if (mode === 'explore' && $('daylight').checked) {
-    Cartesian3.negate(localUp, daylightSun.direction);
-    scene.light = daylightSun;
-  } else scene.light = naturalSun;
 
   const relativeAltitude = apparentAltitude + dip;
   const eyeHeight = observerAltitudeKm < 1
@@ -472,6 +613,37 @@ function commonStarName(star) {
   return star.Name?.trim() || `HR ${star.HR}`;
 }
 
+function limitingMagnitude() {
+  return 6.5 - (+$('pollution').value / 100) * 4.5;
+}
+
+function pollutionDescription(value) {
+  if (value < 15) return 'Dark sky';
+  if (value < 35) return 'Rural sky';
+  if (value < 60) return 'Suburban sky';
+  if (value < 82) return 'Bright suburban';
+  return 'City sky';
+}
+
+function updatePollutionFilter() {
+  const limit = limitingMagnitude();
+  const level = +$('pollution').value;
+  $('pollution-value').textContent = `${pollutionDescription(level)} · m ≤ ${limit.toFixed(1)}`;
+  if (!starPoints) return;
+  let visible = 0;
+  for (let i = 0; i < starCatalog.length; i += 1) {
+    const magnitude = Number.parseFloat(starCatalog[i].Vmag);
+    const show = Number.isFinite(magnitude) && magnitude <= limit;
+    starPoints.get(i).show = show;
+    if (show) visible += 1;
+  }
+  if (selectedStar >= 0 && !starPoints.get(selectedStar).show) {
+    selectedStar = -1;
+    $('sky-object').hidden = true;
+  }
+  starStatus = `${visible.toLocaleString()} visible catalog stars · click a star to identify it`;
+}
+
 async function loadStarCatalog() {
   try {
     const response = await fetch(BSC5_URL);
@@ -490,7 +662,7 @@ async function loadStarCatalog() {
     }
     starPoints.show = mode === 'stargaze';
     updateStars(observationDate());
-    starStatus = `${starCatalog.length.toLocaleString()} catalog stars · click a star to identify it`;
+    updatePollutionFilter();
   } catch (error) {
     console.error('Could not load bsc5.json:', error);
     starStatus = 'The Bright Star Catalogue could not be loaded';
@@ -562,6 +734,31 @@ function formatSpacetimeDate(value) {
 function syncSpacetimeDate() {
   $('spacetime-date').value = spacetimeDate;
   $('spacetime-label').textContent = formatSpacetimeDate(spacetimeDate);
+  renderSpacetimeDays();
+}
+
+function renderSpacetimeDays() {
+  const selectedDay = isoToDay(spacetimeDate);
+  const days = [];
+  $('spacetime-days').replaceChildren();
+  for (let offset = -15; offset <= 15; offset++) {
+    const day = clampDay(selectedDay + offset, firstGibsDay, lastGibsDay);
+    if (days.includes(day)) continue;
+    days.push(day);
+    const iso = dayToIso(day);
+    const date = new Date(`${iso}T12:00:00Z`);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'spacetime-day';
+    button.dataset.date = iso;
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', String(day === selectedDay));
+    button.innerHTML = `<small>${date.toLocaleDateString(undefined, { timeZone: 'UTC', weekday: 'short' })}</small><strong>${date.getUTCDate()}</strong><span>${date.toLocaleDateString(undefined, { timeZone: 'UTC', month: 'short' })}</span>`;
+    button.onclick = () => setSpacetimeDate(iso);
+    $('spacetime-days').append(button);
+  }
+  const active = $('spacetime-days').querySelector('[aria-selected="true"]');
+  requestAnimationFrame(() => active?.scrollIntoView({ inline: 'center', block: 'nearest' }));
 }
 
 function setSpacetimeDate(value) {
@@ -603,18 +800,21 @@ function setMode(nextMode) {
     flyToCoordinates(focus.lat, focus.lng);
   }
   if (starPoints) starPoints.show = isStargazing;
+  moonBillboard.show = isStargazing;
+  if (scene.moon) scene.moon.show = !isStargazing;
+  if (scene.skyBox) scene.skyBox.show = !isStargazing;
   cityOverlay.setSuspended(isStargazing);
-  $('sky-date').disabled = isSpacetime;
+  syncTimeControlState();
   $('sky-now').disabled = isSpacetime;
   document.body.classList.toggle('spacetime-mode', isSpacetime);
   document.body.classList.toggle('stargaze-mode', isStargazing);
+  document.body.classList.toggle('explore-mode', mode === 'explore');
   $('spacetime').hidden = !isSpacetime;
   for (const candidate of ['explore', 'spacetime', 'stargaze']) {
     const active = mode === candidate;
     $(`mode-${candidate}`).classList.toggle('active', active);
     $(`mode-${candidate}`).setAttribute('aria-pressed', String(active));
   }
-  $('view-mode-label').textContent = isStargazing ? 'STARGAZING FROM HERE' : (isSpacetime ? 'EXPLORING SPACETIME' : 'EXPLORING EARTH');
   if (!isStargazing) {
     selectedStar = -1;
     $('sky-object').hidden = true;
@@ -633,24 +833,41 @@ for (const layer of ['buildings', 'roads']) {
   });
 }
 $('det').addEventListener('input', () => { globe.maximumScreenSpaceError = DETAIL_ERRORS[+$('det').value - 1]; });
+$('tile-priority').addEventListener('change', () => {
+  adaptiveNearestUntil = performance.now() + 450;
+  updateAdaptiveTilePriority(performance.now(), 0);
+});
 $('terrain-zoom').addEventListener('change', replaceTerrain);
 $('ex').addEventListener('input', () => { scene.verticalExaggeration = +$('ex').value; });
 $('ex').addEventListener('change', () => cityOverlay.invalidateTerrain());
 $('flat').addEventListener('change', replaceTerrain);
-$('daylight').addEventListener('change', updateEnvironment);
 $('tod').addEventListener('input', updateSun);
 $('sky-date').addEventListener('change', () => { updateSun(); scheduleDailyEvents(true); });
-$('sky-now').addEventListener('click', () => { setObservationControls(new Date()); updateSun(); scheduleDailyEvents(true); });
+$('pollution').addEventListener('input', updatePollutionFilter);
+$('live-time').addEventListener('change', () => {
+  if ($('live-time').checked) $('cyc').checked = false;
+  syncTimeControlState();
+  syncToCurrentTime(true);
+  scheduleDailyEvents(true);
+});
+$('cyc').addEventListener('change', () => {
+  if ($('cyc').checked) $('live-time').checked = false;
+  syncTimeControlState();
+});
+$('sky-now').addEventListener('click', () => {
+  $('live-time').checked = true;
+  $('cyc').checked = false;
+  syncTimeControlState();
+  syncToCurrentTime(true);
+  scheduleDailyEvents(true);
+});
 for (const id of ['jump-sunrise', 'jump-sunset']) $(id).addEventListener('click', event => {
   const minutes = timeToMinutes(event.currentTarget.dataset.time);
   if (minutes === null) return;
+  $('live-time').checked = false;
+  syncTimeControlState();
   $('tod').value = minutes / 60;
   updateSun();
-});
-$('mw').addEventListener('input', () => {
-  const opacity = +$('mw').value;
-  if (scene.skyBox) scene.skyBox.show = opacity > 0;
-  $('mw-value').textContent = `${Math.round(opacity * 100)}%`;
 });
 $('mode-explore').onclick = () => setMode('explore');
 $('mode-spacetime').onclick = () => setMode('spacetime');
@@ -658,6 +875,14 @@ $('mode-stargaze').onclick = () => setMode('stargaze');
 $('spacetime-date').min = GIBS_START_DATE;
 $('spacetime-date').max = dayToIso(lastGibsDay);
 $('spacetime-form').onsubmit = event => { event.preventDefault(); setSpacetimeDate($('spacetime-date').value); };
+$('spacetime-prev').onclick = () => setSpacetimeDate(dayToIso(isoToDay(spacetimeDate) - 1));
+$('spacetime-next').onclick = () => setSpacetimeDate(dayToIso(isoToDay(spacetimeDate) + 1));
+$('spacetime-minimize').onclick = () => {
+  const minimized = $('spacetime').classList.toggle('minimized');
+  $('spacetime-minimize').setAttribute('aria-expanded', String(!minimized));
+  $('spacetime-minimize').setAttribute('aria-label', minimized ? 'Expand timeline' : 'Minimize timeline');
+  $('spacetime-minimize').title = minimized ? 'Expand timeline' : 'Minimize timeline';
+};
 
 const geocodeCache = new Map();
 let lastGeocodeRequest = 0;
@@ -697,7 +922,6 @@ function flyTo(hit) {
   const lng = wrapRadians(hit.lng * D2R);
   if (mode === 'stargaze') setMode('explore');
   flyToCoordinates(lat, lng);
-  $('place').textContent = hit.name.split(',').slice(0, 2).join(',').trim();
   if (!$('cyc').checked) {
     $('tod').value = (((14 - hit.lng / 15) % 24) + 24) % 24;
     updateSun();
@@ -727,25 +951,12 @@ setupUI({
     setMode('explore');
     focus = { lat: INITIAL_VIEW.lat, lng: INITIAL_VIEW.lng };
     setInitialCamera();
-    $('place').textContent = 'A world to discover';
   },
 });
 
 function updateHud() {
-  const loadingMessage = mode === 'stargaze'
-    ? starStatus
-    : overlayLoading.buildings || overlayLoading.roads
-      ? `Loading 3D ${[overlayLoading.buildings && 'buildings', overlayLoading.roads && 'roads'].filter(Boolean).join(' and ')}…`
-    : pendingTiles > 0
-      ? (mode === 'spacetime' ? `Loading ${formatSpacetimeDate(spacetimeDate)}…` : 'Refining your view…')
-      : mode === 'spacetime'
-        ? (cameraHeight() < 200_000 ? 'Dated 30 m HLS imagery ready' : 'Dated MODIS imagery ready')
-        : 'Ready to explore';
-  $('loading-state').textContent = loadingMessage;
-  const altitude = cameraHeight();
-  $('hud').textContent = mode === 'stargaze'
-    ? `${(focus.lat * R2D).toFixed(3)}°, ${(focus.lng * R2D).toFixed(3)}° · az ${degrees(skyAzimuth < 0 ? skyAzimuth + 2 * Math.PI : skyAzimuth).toFixed(1)}° · alt ${degrees(skyAltitude).toFixed(1)}° · ${observationDate().toISOString().slice(0, 16).replace('T', ' ')} UTC`
-    : `${(focus.lat * R2D).toFixed(3)}°, ${(focus.lng * R2D).toFixed(3)}° · ${altitude > 2000 ? `${Math.round(altitude / 1000)} km` : `${Math.round(altitude)} m`} above the ellipsoid`;
+  $('spacetime-loading').hidden = mode !== 'spacetime' || pendingTiles === 0;
+  $('spacetime-loading').textContent = pendingTiles > 0 ? 'Loading NASA GIBS tiles…' : '';
   $('compass-needle').style.transform = `rotate(${-camera.heading}rad)`;
 }
 
@@ -756,6 +967,10 @@ if (import.meta.env.DEV && new URLSearchParams(location.search).has('debug')) {
     pendingTiles,
     tilesLoaded: globe.tilesLoaded,
     maximumScreenSpaceError: globe.maximumScreenSpaceError,
+    tileLoadingPriority: {
+      selected: $('tile-priority').value,
+      effective: usesNearestPriority($('tile-priority').value, adaptiveNearest) ? 'nearest' : 'view-center',
+    },
     tileCacheSize: globe.tileCacheSize,
     verticalExaggeration: scene.verticalExaggeration,
     waterEffect: globe.showWaterEffect,
@@ -777,7 +992,10 @@ function animate(now) {
   lastFrameTime = now;
   frame += 1;
   updateKeyboardCamera(deltaSeconds);
-  if ($('cyc').checked) {
+  keepGlobeCenteredWhileZoomingOut();
+  updateAdaptiveTilePriority(now, deltaSeconds);
+  if (liveTimeEnabled()) syncToCurrentTime();
+  else if ($('cyc').checked) {
     const next = new Date(observationDate().getTime() + deltaSeconds * 0.8 * 3_600_000);
     if (mode === 'spacetime') $('tod').value = (next.getUTCHours() + next.getUTCMinutes() / 60 + next.getUTCSeconds() / 3600) % 24;
     else setObservationControls(next);
@@ -800,9 +1018,9 @@ setInitialCamera();
 setCredit();
 syncSpacetimeDate();
 setObservationControls(new Date());
+syncTimeControlState();
 updateSun();
 updateEnvironment();
 scheduleDailyEvents(true);
 loadStarCatalog();
-$('place').textContent = 'A world to discover';
 requestAnimationFrame(animate);

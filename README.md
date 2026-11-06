@@ -46,6 +46,8 @@ Both layers are hidden while stargazing.
 
 Cesium's `Globe` owns the screen-space quadtree, culling, request scheduling, parent fallback, tile cache, mesh generation, skirts, and imagery reprojection. The **Terrain detail** slider maps to Cesium's maximum screen-space error, and the cache holds up to 320 tiles.
 
+**Tile loading priority** controls the order of visible pending work. **View center** retains Cesium's direction-weighted ordering, **Nearest terrain** loads by camera distance, and **Adaptive** uses nearest-first ordering during camera motion before returning to the view center after the camera settles. This changes request order, not the screen-space-error detail target.
+
 Earthviz supplies the elevation data. Its terrain provider decodes each 256 px Mapzen Terrarium RGB tile into a 33×33 height grid in meters plus a water mask and hands it to Cesium as `HeightmapTerrainData`. Coastline classification scans every source pixel so sparse mesh samples do not erase small islands, and tiles known to be entirely ocean stop requesting descendants from level 5. Terrain and imagery are capped at their native levels; Cesium stretches the best available parent image across finer terrain. Web Mercator data ends near ±85°.
 
 Source imagery is draped directly and Cesium's reflective water material is disabled. Imagery sharpness is limited by the selected provider.
@@ -58,13 +60,13 @@ Lighting follows the selected imagery date. The UTC time slider moves through th
 
 ### Stargazing
 
-**Stargaze** renders all 9,096 BSC5 entries at their catalog visual magnitudes and B−V/temperature colors. J2000 coordinates are advanced to the observing date using catalog proper motions and precession, then rotated by Greenwich mean sidereal time so the horizon changes correctly with UTC, latitude, and longitude. Set the date and UTC time under **Lighting**, or press **Now**. Drag or use the arrow keys to look around, scroll to change the field of view, and click a star for its name, HR number, magnitude, spectral class, altitude, and azimuth.
+**Stargaze** uses the BSC5 catalogue as its sole star layer, rendered at catalog visual magnitudes and B−V/temperature colors. J2000 coordinates are advanced to the observing date using catalog proper motions and precession, then rotated by Greenwich mean sidereal time so the horizon changes correctly with UTC, latitude, and longitude. Set the date and UTC time under **Lighting**, or press **Now**. Drag or use the arrow keys to look around, scroll to change the field of view, and click a star to open its name, HR number, magnitude, spectral class, altitude, and azimuth in a lower-left card. The **Light pollution** control lowers the limiting visible magnitude from a dark-sky value of 6.5 to a bright-city value of 2.0.
 
 ### Lighting
 
-The **Lighting** panel shows the location's sunrise, sunset, civil twilight, solar transit, Moon rise/set, phase, and illumination in UTC, with a daily timeline that handles daylight crossing UTC midnight. Sunrise and sunset buttons jump to those events. In **Explore**, **Keep terrain in daylight** places clear daylight over the current view without changing the selected date or time; Spacetime always uses its real date and lighting.
+The **Lighting** panel shows the location's sunrise, sunset, civil twilight, solar transit, Moon rise/set, phase, and illumination in UTC, with a daily timeline that handles daylight crossing UTC midnight. **Follow current time** keeps Explore and Stargaze synchronized to the real UTC clock; changing to accelerated day/night animation or jumping to sunrise or sunset turns live synchronization off. The **Today** button returns to live time. Spacetime always uses its real date and lighting.
 
-Cesium draws the Sun, Moon, starry sky, atmosphere, and dynamic Sun lighting from the same UTC clock. Earthviz keeps its own astronomy for the twilight timeline, near-horizon refraction, observer-height horizon dip, daylight override, and the BSC5 star layer. The panel reports the local solar altitude, phase, and horizon dip.
+Cesium draws the Sun, atmosphere, dynamic Sun lighting, and the globe-view Moon from the same UTC clock. In Stargaze, Earthviz replaces that distant model with a phase-aware Moon disc sized for the current field of view, while the static star skybox is hidden to avoid duplicating the BSC5 stars. Earthviz also keeps its own astronomy for the twilight timeline, near-horizon refraction, observer-height horizon dip, and the BSC5 star layer. The panel reports the local solar altitude, phase, and horizon dip.
 
 ## Data sources
 

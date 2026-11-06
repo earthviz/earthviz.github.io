@@ -113,3 +113,13 @@ export function tileWindow(longitude, latitude, options = {}) {
   }
   return result.sort((a, b) => a.distance - b.distance);
 }
+
+export function tileDistanceToLocation(tile, longitude, latitude) {
+  const tiles = 2 ** tile.z;
+  const tileLongitude = ((tile.x + 0.5) / tiles) * 2 * Math.PI - Math.PI;
+  const tileLatitude = Math.atan(Math.sinh(Math.PI * (1 - 2 * (tile.y + 0.5) / tiles)));
+  const longitudeDelta = ((tileLongitude - longitude + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+  const latitudeDelta = tileLatitude - latitude;
+  const eastWest = longitudeDelta * Math.cos((tileLatitude + latitude) * 0.5);
+  return eastWest * eastWest + latitudeDelta * latitudeDelta;
+}

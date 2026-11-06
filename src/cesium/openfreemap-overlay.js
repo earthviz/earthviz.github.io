@@ -27,6 +27,7 @@ import {
   ringArea,
   roadRank,
   selectTop,
+  tileDistanceToLocation,
   tilePointToRadians,
   tileWindow,
 } from './openfreemap-geometry.js';
@@ -315,7 +316,7 @@ class OverlayLayer {
     if (!this.active) return;
     const nearest = state => [...this.tiles.values()]
       .filter(record => record.state === state && record.desired)
-      .sort((a, b) => a.distance - b.distance);
+      .sort((a, b) => this.host.tilePriority(a) - this.host.tilePriority(b));
 
     for (const record of nearest('queued')) {
       if (this.fetching >= MAX_FETCHES_PER_LAYER) break;
@@ -607,6 +608,7 @@ export class OpenFreeMapOverlayController {
     this.suspended = false;
     this.cache = new TileDataCache();
     this.commitChain = Promise.resolve();
+    this.nearestPriority = false;
     this.layers = {
       buildings: new OverlayLayer(this, 'buildings'),
       roads: new OverlayLayer(this, 'roads'),
@@ -633,6 +635,20 @@ export class OpenFreeMapOverlayController {
   setTerrainProvider(terrainProvider) {
     this.terrainProvider = terrainProvider;
     this.invalidateTerrain();
+  }
+
+  setNearestPriority(nearestPriority) {
+    if (this.nearestPriority === nearestPriority) return;
+    this.nearestPriority = nearestPriority;
+    for (const layer of Object.values(this.layers)) layer.pump();
+  }
+
+  tilePriority(tile) {
+    if (!this.nearestPriority) return tile.distance;
+    const cameraPosition = this.scene.camera.positionCartographic;
+    return cameraPosition
+      ? tileDistanceToLocation(tile, cameraPosition.longitude, cameraPosition.latitude)
+      : tile.distance;
   }
 
   // Only buildings depend on terrain heights; ground-clamped roads follow the

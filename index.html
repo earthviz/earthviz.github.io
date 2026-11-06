@@ -8,9 +8,9 @@
     <title>Earthviz · Explore our planet</title>
     <link rel="stylesheet" href="/src/styles.css">
   </head>
-  <body>
+  <body class="explore-mode">
     <header class="topbar">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">◎</span> earthviz <span class="brand-caption">A different perspective.</span></div>
+      <a class="brand" href="/" aria-label="earthviz home"><span class="brand-mark" aria-hidden="true"></span><span>earthviz</span></a>
       <div class="mode-switch" role="group" aria-label="Viewing mode">
         <button id="mode-explore" class="mode-button active" type="button" aria-pressed="true">Explore</button>
         <button id="mode-spacetime" class="mode-button" type="button" aria-pressed="false"><span aria-hidden="true">◷</span> Spacetime</button>
@@ -19,10 +19,10 @@
       <div class="search-shell">
         <form id="sf" role="search" autocomplete="off">
           <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
-          <input id="q" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="hits" placeholder="Where would you like to go? Search a place or coordinates" aria-label="Search places or latitude, longitude">
+          <input id="q" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="hits" placeholder="Search places or coordinates" aria-label="Search places or latitude, longitude">
           <button id="clear-search" type="button" aria-label="Clear search" title="Clear search" hidden>×</button>
           <kbd class="search-shortcut">Ctrl K</kbd>
-          <button id="sb" type="submit">Explore <span aria-hidden="true">↗</span></button>
+          <button id="sb" type="submit">Go <span aria-hidden="true">↗</span></button>
         </form>
         <div id="suggestions" class="suggestions" hidden>
           <div id="search-message" class="eyebrow" role="status">A little inspiration</div>
@@ -32,90 +32,88 @@
       </div>
     </header>
 
-    <aside class="map-tools left-tools" aria-label="Map appearance">
-      <details class="tool-panel" id="map-panel">
-        <summary><span class="tool-icon" aria-hidden="true">▱</span> Map & terrain <span class="chevron" aria-hidden="true">⌄</span></summary>
+    <aside class="explore-controls" aria-label="Explore controls">
+      <details class="tool-panel" id="tiles-panel">
+        <summary><span><strong>Tiles</strong><small>Imagery and loading</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
         <div class="panel-content">
-          <div class="eyebrow">YOUR PERSPECTIVE</div>
-          <div class="explore-imagery"><label for="src">Satellite imagery</label>
-          <select id="src"><option value="eox">Sentinel-2 · Natural color</option><option value="esri">Esri · World Imagery</option></select></div>
-          <label class="switch-row city-overlay-switch" for="overlay-buildings">3D buildings<input id="overlay-buildings" type="checkbox" role="switch"></label>
-          <small id="overlay-buildings-status" class="overlay-status" aria-live="polite">Off</small>
-          <label class="switch-row city-overlay-switch" for="overlay-roads">Roads<input id="overlay-roads" type="checkbox" role="switch"></label>
-          <small id="overlay-roads-status" class="overlay-status" aria-live="polite">Off</small>
-          <div class="field-label"><label for="det">Terrain detail</label><output id="detail-value" for="det">Balanced</output></div>
+          <label for="src">Tile source</label>
+          <select id="src"><option value="eox">Sentinel-2 · Natural color</option><option value="esri">Esri · World Imagery</option></select>
+          <label for="tile-priority">Tile loading priority</label>
+          <select id="tile-priority" aria-describedby="tile-priority-note"><option value="adaptive" selected>Adaptive</option><option value="view-center">View center</option><option value="nearest">Nearest terrain</option></select>
+          <p id="tile-priority-note" class="panel-note">Adaptive prioritizes nearby tiles while moving, then resolves the view center.</p>
+        </div>
+      </details>
+
+      <details class="tool-panel" id="terrain-panel">
+        <summary><span><strong>Terrain</strong><small>Surface quality and relief</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
+        <div class="panel-content">
+          <div class="field-label"><label for="det">Detail</label><output id="detail-value" for="det">Balanced</output></div>
           <input id="det" type="range" min="1" max="6" step="1" value="4">
           <div class="range-labels"><span>Lighter</span><span>Sharper</span></div>
-          <div class="field-label"><label for="terrain-zoom">Terrain max zoom</label><output id="terrain-zoom-value" for="terrain-zoom">z14</output></div>
+          <div class="field-label"><label for="terrain-zoom">Max zoom</label><output id="terrain-zoom-value" for="terrain-zoom">z14</output></div>
           <input id="terrain-zoom" type="range" min="10" max="15" step="1" value="14">
           <div class="range-labels"><span>z10</span><span>z15</span></div>
           <div class="field-label"><label for="ex">Elevation scale</label><output id="ex-value" for="ex">1.0×</output></div>
           <input id="ex" type="range" min="0.5" max="6" step="0.1" value="1">
           <label class="switch-row" for="flat">Smooth ocean surface<input id="flat" type="checkbox" role="switch" checked></label>
-          <p class="panel-note">z14 is the stable default; z15 remains available for maximum terrain detail.</p>
+        </div>
+      </details>
+
+      <details class="tool-panel" id="human-panel">
+        <summary><span><strong>Human elements</strong><small>Built environment</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
+        <div class="panel-content">
+          <label class="switch-row" for="overlay-buildings">3D buildings<input id="overlay-buildings" type="checkbox" role="switch"></label>
+          <small id="overlay-buildings-status" class="overlay-status" aria-live="polite">Off</small>
+          <label class="switch-row" for="overlay-roads">Roads<input id="overlay-roads" type="checkbox" role="switch"></label>
+          <small id="overlay-roads-status" class="overlay-status" aria-live="polite">Off</small>
+        </div>
+      </details>
+
+      <details class="tool-panel stargaze-info" id="sky-panel">
+        <summary><span><strong>Sky conditions</strong><small>Daylight and observation</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
+        <div class="panel-content">
+          <div class="field-label observation-date"><label for="sky-date">Observation date · UTC</label><button id="sky-now" type="button">Today</button></div>
+          <input id="sky-date" type="date">
+          <label id="tl" for="tod">Sun 08:00 UTC</label>
+          <input id="tod" type="range" min="0" max="24" step="0.05" value="8">
+          <div class="range-labels"><span>00:00</span><span>12:00</span><span>24:00</span></div>
+          <div id="sun-flow" class="sun-flow" aria-live="polite">
+            <div class="sun-flow-head"><strong id="sun-state">Loading Sun and Moon…</strong><span id="sun-next"></span></div>
+            <div id="sun-track" class="sun-track" role="img" aria-label="Daily sunlight timeline"><i class="sun-now" aria-hidden="true"></i></div>
+            <div class="sun-events"><button id="jump-sunrise" type="button">↑ <span>Sunrise —</span></button><button id="jump-sunset" type="button">↓ <span>Sunset —</span></button></div>
+            <div id="moon-events" class="moon-events">Moon data loading…</div>
+            <div id="atmosphere-readout" class="atmosphere-readout">Calculating atmospheric path…</div>
+            <small id="sun-source"></small>
+          </div>
+          <label class="switch-row live-time-control" for="live-time">Follow current time<input id="live-time" type="checkbox" role="switch" checked></label>
+          <label class="switch-row" for="cyc">Animate day & night<input id="cyc" type="checkbox" role="switch"></label>
+          <div class="field-label"><label for="pollution">Light pollution</label><output id="pollution-value" for="pollution">Dark sky · m ≤ 6.5</output></div>
+          <input id="pollution" type="range" min="0" max="100" step="1" value="0" aria-describedby="pollution-note">
+          <div class="range-labels"><span>Dark sky</span><span>City sky</span></div>
+          <p id="pollution-note" class="panel-note">Filter the simulated sky to match local visibility.</p>
         </div>
       </details>
     </aside>
 
     <section id="spacetime" class="spacetime" aria-label="Spacetime date" hidden>
       <div class="spacetime-head">
-        <div>
-          <div class="eyebrow">NASA GIBS · MODIS + HLS</div>
-          <strong id="spacetime-label">Earth through time</strong>
+        <div><div class="eyebrow">NASA EARTH OBSERVATION</div><strong id="spacetime-label">Earth through time</strong></div>
+        <div class="timeline-actions">
+          <button id="spacetime-prev" type="button" aria-label="Previous day" title="Previous day">←</button>
+          <button id="spacetime-next" type="button" aria-label="Next day" title="Next day">→</button>
+          <form id="spacetime-form" class="date-jump"><label class="sr-only" for="spacetime-date">Choose any date</label><input id="spacetime-date" type="date"><button id="spacetime-load" type="submit">View</button></form>
+          <button id="spacetime-minimize" type="button" aria-expanded="true" aria-label="Minimize timeline" title="Minimize timeline">⌄</button>
         </div>
-        <form id="spacetime-form" class="date-jump">
-          <label for="spacetime-date">Choose a date</label>
-          <input id="spacetime-date" type="date">
-          <button id="spacetime-load" type="submit">View date</button>
-        </form>
       </div>
-      <p class="panel-note">MODIS globally, 30 m HLS Landsat/Sentinel up close. Unavailable NASA pixels remain black.</p>
+      <div id="spacetime-loading" class="spacetime-loading" role="status" hidden>Loading NASA GIBS tiles…</div>
+      <div id="spacetime-days" class="spacetime-days" role="listbox" aria-label="Observation dates"></div>
     </section>
 
-    <aside class="map-tools right-tools" aria-label="Lighting">
-      <details class="tool-panel" id="light-panel">
-        <summary><span class="tool-icon" aria-hidden="true">☼</span> Lighting <span class="chevron" aria-hidden="true">⌄</span></summary>
-        <div class="panel-content">
-          <section class="lighting-section">
-            <div class="section-label">SUN POSITION</div>
-            <div class="field-label observation-date"><label for="sky-date">Date · UTC</label><button id="sky-now" type="button">Today</button></div>
-            <input id="sky-date" type="date">
-            <label id="tl" for="tod">Sun 08:00 UTC</label>
-            <input id="tod" type="range" min="0" max="24" step="0.05" value="8">
-            <div class="range-labels"><span>00:00</span><span>12:00</span><span>24:00</span></div>
-            <div id="sun-flow" class="sun-flow" aria-live="polite">
-              <div class="sun-flow-head"><strong id="sun-state">Loading Sun and Moon…</strong><span id="sun-next"></span></div>
-              <div id="sun-track" class="sun-track" role="img" aria-label="Daily sunlight timeline"><i class="sun-now" aria-hidden="true"></i></div>
-              <div class="sun-events"><button id="jump-sunrise" type="button">↑ <span>Sunrise —</span></button><button id="jump-sunset" type="button">↓ <span>Sunset —</span></button></div>
-              <div id="moon-events" class="moon-events">Moon data loading…</div>
-              <div id="atmosphere-readout" class="atmosphere-readout">Calculating atmospheric path…</div>
-              <small id="sun-source"></small>
-            </div>
-          </section>
-          <section class="lighting-section">
-            <div class="section-label">DAYLIGHT BEHAVIOR</div>
-            <label class="switch-row" for="cyc">Animate day & night<input id="cyc" type="checkbox" role="switch"></label>
-            <label class="switch-row explore-daylight" for="daylight">Keep terrain in daylight<input id="daylight" type="checkbox" role="switch"></label>
-            <p class="panel-note explore-daylight">Keeps terrain visible in daylight while the selected time remains unchanged.</p>
-          </section>
-          <section class="lighting-section">
-            <div class="section-label">NIGHT SKY</div>
-            <div class="field-label"><label for="mw">Milky Way</label><output id="mw-value" for="mw">100%</output></div>
-            <input id="mw" type="range" min="0" max="1" step="0.01" value="1" aria-label="Milky Way image opacity">
-            <div class="range-labels"><span>Stars only</span><span>Milky Way</span></div>
-            <p class="panel-note">Adjust the background sky without changing terrain lighting.</p>
-          </section>
-        </div>
-      </details>
+    <aside id="sky-object" class="sky-object-card" aria-live="polite" hidden>
+      <div class="eyebrow">SELECTED STAR</div>
+      <strong id="sky-object-name"></strong>
+      <span id="sky-object-details"></span>
     </aside>
-
-    <section class="location-card" aria-label="Current view">
-      <div class="eyebrow"><span class="live-dot"></span> <span id="view-mode-label">EXPLORING EARTH</span></div>
-      <h1 id="place">A world to discover</h1>
-      <div id="hud"></div>
-      <div id="sky-object" hidden><strong id="sky-object-name"></strong><span id="sky-object-details"></span></div>
-      <div id="loading-state" role="status">Preparing your view…</div>
-    </section>
 
     <nav class="navigation" aria-label="Map navigation">
       <button id="north" class="compass" type="button" aria-label="Face north" title="Face north"><span>N</span><span id="compass-needle" aria-hidden="true">▲</span></button>

@@ -7,6 +7,7 @@ import {
   ringArea,
   roadRank,
   selectTop,
+  tileDistanceToLocation,
   tilePointToRadians,
   tileWindow,
 } from '../src/cesium/openfreemap-geometry.js';
@@ -43,6 +44,21 @@ test('creates a bounded tile window and wraps across the antimeridian', () => {
   assert.equal(window[0].distance, 0);
   assert.ok(window.some(tile => tile.x === 0));
   assert.ok(window.some(tile => tile.x === 7));
+});
+
+test('ranks overlay tiles by distance from the camera ground position', () => {
+  const window = tileWindow(0, 0, { zoom: 3, radius: 1 });
+  const center = window.find(tile => tile.distance === 0);
+  const edge = window.find(tile => tile.distance === 1);
+  const tiles = 2 ** center.z;
+  const centerLongitude = ((center.x + 0.5) / tiles) * 2 * Math.PI - Math.PI;
+  const centerLatitude = Math.atan(Math.sinh(Math.PI * (1 - 2 * (center.y + 0.5) / tiles)));
+  assert.equal(tileDistanceToLocation(center, centerLongitude, centerLatitude), 0);
+  assert.ok(tileDistanceToLocation(center, centerLongitude, centerLatitude)
+    < tileDistanceToLocation(edge, centerLongitude, centerLatitude));
+
+  const acrossDateline = { x: 0, y: center.y, z: 3 };
+  assert.ok(tileDistanceToLocation(acrossDateline, Math.PI - 1e-8, 0) < 1);
 });
 
 test('buildings load in a tighter window than roads', () => {
