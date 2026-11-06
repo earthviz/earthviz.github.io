@@ -21,37 +21,34 @@ Then open the local URL printed by Vite. The production build is created with `n
 
 ## Progressive detail
 
-The globe uses a screen-space quadtree with hysteresis: imagery refines when
-its projected size grows, while terrain grids independently range from 4×4 to
-32×32 cells according to visible relief. Coarse DEM tiles classify land and
-water; tiles classified as ocean stop refining at level 5 or deeper. Coastline classification scans every
-DEM pixel, but islands smaller than the source data resolution may still be
-missed. Unknown areas remain eligible for refinement.
+Cesium's `Globe` now owns the screen-space quadtree, horizon/frustum culling,
+request scheduling, parent fallback, tile cache, mesh generation, edge skirts,
+and imagery reprojection. The Terrain detail slider maps directly to Cesium's
+maximum screen-space error, while the cache retains up to 320 tiles for quick
+zoom-out and revisits.
 
-Beyond the coarse classification levels, elevation requests wait until estimated
-unresolved relief exceeds two pixels or the viewing range drops below 80 km.
-Until then, children interpolate their parent's elevation. This is a heuristic,
-not a guarantee of subpixel terrain accuracy. Parent imagery remains visible
-until all visible children are ready; failed imagery retries after 15 seconds.
+Earthviz still owns the elevation data. Its terrain provider decodes each 256 px
+Mapzen Terrarium RGB tile into a 33×33 height grid in meters and a water mask, then
+hands that data to Cesium as `HeightmapTerrainData`. Coastline classification
+scans every source pixel so sparse mesh samples do not erase small islands;
+tiles known to be entirely ocean stop requesting descendants from level 5.
+Terrain and provider imagery are capped at their real native levels, and Cesium
+stretches the best available parent image across finer terrain without visible
+tile gaps. Web Mercator data ends near ±85°.
 
-Refinement spends its budget on the largest projected detail gaps across the
-whole view, rather than finishing one branch first. Only visible children count
-against that budget, including children still loading. Loaded terrain uses its
-actual height bounds for visibility instead of a fixed mountain-sized margin.
-
-Work is bounded to 120 selected leaves, 320 cached tiles, 64 queued tiles and six
-concurrent tile loads. Completed tiles are built one per animation frame;
-geometry changes also rebuild at most one visible mesh per frame. Stale loads
-are canceled, unused tiles are evicted, and zooming out immediately reuses
-cached parents. Provider failures keep coarser imagery visible. Web Mercator
-imagery ends at ±85°; polar caps remain a simple globe surface.
+The production bundle imports the headless `@cesium/engine` widget and the core
+math types instead of Cesium Viewer or its UI packages. Deployment copies only
+the heightmap/picking workers and sky, celestial, water, and attribution assets
+used by Earthviz; the 3D Tiles, generic geometry, Draco, KTX, and archive worker
+or codec assets are not shipped.
 
 Run `npm test` for queue and detail-policy regression tests, and `npm run build`
 for production validation. In development, open `/?debug` and call
-`earthvizStats()` in the browser console to inspect tile budgets, mesh density,
-and frame progress. Check repeated zoom-in/out, panning during loads, switching
-imagery, coastlines, and mountain views. Imagery quality remains limited by the
-selected provider's available resolution.
+`earthvizStats()` in the browser console to inspect pending tiles, screen-space
+error, cache size, imagery mode, camera state, and frame progress. Check repeated
+zoom-in/out, panning during loads, switching imagery, coastlines, and mountain
+views. Imagery quality remains limited by the selected provider's available
+resolution.
 
 ## Spacetime
 
@@ -90,11 +87,18 @@ terrain in daylight** to place clear daylight over the current view without
 changing the selected astronomical date or time; Spacetime always uses its real
 date and lighting flow.
 
-The Sun and Moon are rendered as distant spheres at their physical apparent
-angular diameters. Solar size follows Earth–Sun distance; lunar size follows the
-topocentric camera–Moon distance, including observer parallax. The Moon shader is
-illuminated from the astronomical Sun direction, so its visible terminator and
-phase evolve continuously with the selected UTC date and time.
+Cesium renders the Sun, Moon, and starry sky from the same selected UTC clock
+used by Earthviz's local astronomy. The BSC5 catalogue remains an Earthviz point
+layer, with its proper-motion/precession and local-horizon calculations under
+application control.
+
+### Atmospheric sky
+
+Cesium's globe atmosphere and dynamic Sun lighting now draw the sky and terrain.
+Earthviz retains its local astronomical model for the twilight timeline,
+near-horizon refraction, observer-height horizon dip, and daylight override.
+The Lighting panel reports the current local solar altitude, phase, and horizon
+dip without taking mesh or imagery control back from Cesium.
 
 ## Exploring the map
 
@@ -104,8 +108,12 @@ or enter `latitude, longitude`. Use **↑ / ↓** and **Enter** to choose a sugg
 **Escape** to dismiss it, and **Ctrl/Cmd + K** to focus search.
 
 Map and terrain settings live at the upper left; lighting controls live at the
-upper right. The lower-right buttons zoom, face north, or return to the initial
-globe view. Location and loading status appear at the lower left. On narrow
-screens, only one settings panel opens at a time. Credits and interaction tips
-are available in the footer.
+upper right. Left-drag pans the globe, right-drag orbits around the picked
+surface, middle-drag or Shift-drag free-looks, and the wheel zooms. WASD moves
+the camera, Q/E moves vertically, arrow keys look, and Shift accelerates held
+keys. The lower-right buttons zoom, face north, or return to the initial globe
+view. Location and loading status appear at the lower left. On narrow screens,
+only one settings panel opens at a time. Credits and interaction tips are
+available in the footer. Source imagery is draped directly; Cesium's reflective
+water material is disabled.
 # earthviz

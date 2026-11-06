@@ -35,6 +35,12 @@ import {
   isoToDay,
   previousUtcDate,
 } from './spacetime.js';
+import {
+  apparentSolarAltitude,
+  horizonDip,
+  solarPhase,
+  solarTransmission,
+} from './sky-model.js';
 
 const R = 6371;
 const S = 32; // Elevation sampling grid; rendered geometry is independently adaptive.
@@ -112,42 +118,100 @@ capS.rotation.x = Math.PI;
 back.add(capN, capS);
 scene.add(back);
 
-const sunU = { value: new THREE.Vector3(1, 0, 0) };
-const fadeU = { value: 1 };
 const visU = { value: 1 };
-const atm = new THREE.Mesh(
-  new THREE.SphereGeometry(R + 100, 96, 48),
+
+// The old background was a single blue value switched on by a coarse solar
+// threshold. This dome is drawn behind the stars and terrain, and uses the
+// actual local Sun altitude for a continuous day → golden hour → twilight →
+// night transition. It is intentionally an analytic approximation rather than
+// a pre-baked gradient, so its horizon moves correctly with the observer.
+const skyU = {
+  sun: { value: new THREE.Vector3(1, 0, 0) },
+  up: { value: new THREE.Vector3(0, 1, 0) },
+  density: { value: 1 },
+  sunAltitude: { value: 1 },
+  sunTransmission: { value: new THREE.Vector3(1, 1, 1) },
+};
+const skyDome = new THREE.Mesh(
+  new THREE.SphereGeometry(1, 48, 32),
   new THREE.ShaderMaterial({
-    uniforms: { uSun: sunU, uFade: fadeU },
+    uniforms: {
+      uSun: skyU.sun,
+      uUp: skyU.up,
+      uDensity: skyU.density,
+      uSunAltitude: skyU.sunAltitude,
+      uSunTransmission: skyU.sunTransmission,
+    },
     side: THREE.BackSide,
-    transparent: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    depthTest: false,
     fog: false,
     vertexShader: `
-      varying vec3 vN, vW;
+      varying vec3 vDirection;
       void main() {
-        vN = normalize(normalMatrix * normal);
-        vW = normalize(mat3(modelMatrix) * normal);
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        vDirection = normalize(position);
+        vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        gl_Position = p.xyww;
       }
     `,
     fragmentShader: `
       uniform vec3 uSun;
-      uniform float uFade;
-      varying vec3 vN, vW;
+      uniform vec3 uUp;
+      uniform float uDensity;
+      uniform float uSunAltitude;
+      uniform vec3 uSunTransmission;
+      varying vec3 vDirection;
+      const float PI = 3.141592653589793;
+
       void main() {
-        float i = min(1.5, pow(max(0.0, 0.62 - dot(vN, vec3(0.0, 0.0, 1.0))), 3.0) * 2.2);
-        float sd = dot(vW, uSun);
-        float sun = clamp(sd * 1.6 + 0.45, 0.0, 1.0);
-        vec3 c = mix(vec3(0.25, 0.5, 1.0), vec3(1.0, 0.55, 0.3),
-          (1.0 - smoothstep(0.0, 0.35, abs(sd))) * 0.6);
-        gl_FragColor = vec4(c * i * sun * uFade, 1.0);
+        vec3 viewDirection = normalize(vDirection);
+        float elevation = dot(viewDirection, normalize(uUp));
+        float viewSun = clamp(dot(viewDirection, normalize(uSun)), -1.0, 1.0);
+
+        // A long look through the atmosphere toward the horizon has more
+        // scattering, but the approximation is capped to keep it stable.
+        float viewAirMass = 1.0 / max(0.10, elevation + 0.15);
+        viewAirMass = min(viewAirMass, 6.0);
+        float horizon = pow(1.0 - smoothstep(-0.14, 0.72, elevation), 1.45);
+        float density = clamp(uDensity * (0.22 + 0.78 * viewAirMass / 6.0), 0.0, 1.0);
+
+        // -18 degrees is astronomical twilight. A little blue remains during
+        // civil/nautical twilight even once the direct disk is below Earth.
+        float twilight = smoothstep(-0.314, 0.045, uSunAltitude);
+        float daylight = smoothstep(-0.045, 0.16, uSunAltitude);
+        float golden = exp(-pow((uSunAltitude - 0.025) / 0.13, 2.0));
+
+        vec3 night = vec3(0.0008, 0.0018, 0.006);
+        vec3 twilightZenith = vec3(0.008, 0.026, 0.090);
+        vec3 twilightHorizon = vec3(0.22, 0.055, 0.095);
+        vec3 twilightSky = mix(twilightZenith, twilightHorizon, horizon * (0.28 + 0.72 * golden));
+
+        vec3 dayZenith = vec3(0.020, 0.145, 0.52);
+        vec3 dayHorizon = vec3(0.48, 0.72, 0.93);
+        vec3 daySky = mix(dayZenith, dayHorizon, horizon);
+        daySky = mix(daySky, vec3(0.96, 0.25, 0.055), golden * horizon * 0.72);
+
+        vec3 sky = mix(night, twilightSky, twilight * density);
+        sky = mix(sky, daySky * density, daylight);
+
+        // Rayleigh's symmetric phase function and a forward Mie lobe put a
+        // bright, warm aureole around the low Sun without a painted texture.
+        float rayleigh = 0.18 * (1.0 + viewSun * viewSun) * density * twilight;
+        float mie = pow(max(viewSun, 0.0), mix(68.0, 9.0, golden)) * density;
+        vec3 aureole = uSunTransmission * (mie * (0.34 + 0.66 * daylight) + rayleigh * 0.09);
+        sky += aureole;
+
+        // Under the local horizon the globe normally occludes this dome. This
+        // guard avoids a bright atmospheric band if a terrain tile is absent.
+        sky *= smoothstep(-0.34, -0.05, elevation);
+        gl_FragColor = vec4(sky, 1.0);
       }
     `,
   }),
 );
-scene.add(atm);
+skyDome.frustumCulled = false;
+skyDome.renderOrder = -3;
+scene.add(skyDome);
 
 let starCatalog = [];
 let starEquatorial = [];
@@ -308,9 +372,14 @@ function loadMilkyWay() {
 }
 
 const celestialGeometry = new THREE.SphereGeometry(1, 48, 32);
+const sunBodyU = {
+  transmission: { value: new THREE.Vector3(1, 1, 1) },
+  visibility: { value: 1 },
+};
 const sunBody = new THREE.Mesh(
   celestialGeometry,
   new THREE.ShaderMaterial({
+    uniforms: { uTransmission: sunBodyU.transmission, uVisibility: sunBodyU.visibility },
     transparent: true,
     depthWrite: false,
     fog: false,
@@ -322,13 +391,15 @@ const sunBody = new THREE.Mesh(
       }
     `,
     fragmentShader: `
+      uniform vec3 uTransmission;
+      uniform float uVisibility;
       varying vec3 vViewNormal;
       void main() {
         float mu = clamp(vViewNormal.z, 0.0, 1.0);
-        vec3 edge = vec3(1.0, 0.48, 0.12);
-        vec3 center = vec3(1.0, 0.94, 0.68);
+        vec3 edge = vec3(1.0, 0.62, 0.24) * uTransmission;
+        vec3 center = vec3(1.0, 0.96, 0.78) * uTransmission;
         vec3 color = mix(edge, center, pow(mu, 0.45));
-        gl_FragColor = vec4(color, 1.0);
+        gl_FragColor = vec4(color, uVisibility);
       }
     `,
   }),
@@ -1308,6 +1379,8 @@ addEventListener('resize', () => {
 
 /* ---------- sun, sky and atmosphere ---------- */
 const sunDirection = new THREE.Vector3();
+const apparentSunDirection = new THREE.Vector3();
+const sunHorizontal = new THREE.Vector3();
 const moonGeocentric = new THREE.Vector3();
 const moonTopocentric = new THREE.Vector3();
 const background = new THREE.Color();
@@ -1323,6 +1396,14 @@ let dailyEvents = null;
 let riseSetContext = '';
 let riseSetTimer = 0;
 let riseSetController = null;
+let localSun = {
+  trueAltitude: 0,
+  apparentAltitude: 0,
+  horizonDip: 0,
+  observerAltitude: 0,
+  density: 1,
+};
+let atmosphereReadout = '';
 
 function currentRiseSetContext() {
   return `${$('sky-date').value}:${(view.lat / D2R).toFixed(3)}:${(view.lng / D2R).toFixed(3)}`;
@@ -1450,7 +1531,6 @@ function updateSun() {
   astronomySidereal = sidereal;
   sunDirection.copy(ll2v(sun.dec, sun.ra - sidereal));
   moonGeocentric.copy(ll2v(moon.dec, moon.ra - sidereal, moon.distanceKm));
-  sunU.value.copy(sunDirection);
   sunL.position.copy(sunDirection).multiplyScalar(10);
   stars.rotation.y = -sidereal;
   stars.updateMatrixWorld();
@@ -1469,7 +1549,9 @@ function updateCelestialBodies() {
   if (!sunEphemeris || !moonEphemeris) return;
   const renderDistance = camera.far * 0.994;
   const sunAngularRadius = apparentAngularDiameter(SUN_RADIUS_KM, sunEphemeris.distanceAu * AU_KM) / 2;
-  sunBody.position.copy(sunDirection).multiplyScalar(renderDistance);
+  // Near the horizon the disk is placed at its refracted apparent direction.
+  // The light itself remains on the astronomical (unrefracted) vector.
+  sunBody.position.copy(apparentSunDirection).multiplyScalar(renderDistance);
   sunBody.scale.setScalar(Math.tan(sunAngularRadius) * renderDistance);
 
   // The Moon's parallax is large enough to matter. Subtract the actual virtual
@@ -1532,20 +1614,82 @@ function pickStar(clientX, clientY) {
 }
 
 function updateEnvironment() {
-  const altitude = Math.max(0, cameraPosition.length() - R - groundHeight);
-  const atmosphere = Math.exp(-altitude / 40);
+  // The camera's radial height (rather than its map zoom) determines both the
+  // density of air overhead and how far below level the geometric horizon is.
+  // That is what lets a mountain or orbital view continue to see the Sun after
+  // an observer at sea level has lost it.
+  const observerAltitude = Math.max(0, cameraPosition.length() - R);
+  const atmosphere = Math.exp(-observerAltitude / 8.5);
+  const trueAltitude = Math.asin(clamp(cameraUnit.dot(sunDirection), -1, 1));
+  const apparentAltitude = apparentSolarAltitude(trueAltitude, atmosphere);
+  const horizon = horizonDip(observerAltitude);
+  const transmission = solarTransmission(trueAltitude, atmosphere);
+  const visibleSolarAltitude = apparentAltitude + horizon;
+
+  sunHorizontal.copy(sunDirection).addScaledVector(cameraUnit, -cameraUnit.dot(sunDirection));
+  if (sunHorizontal.lengthSq() > 1e-10) {
+    sunHorizontal.normalize();
+    apparentSunDirection
+      .copy(sunHorizontal).multiplyScalar(Math.cos(apparentAltitude))
+      .addScaledVector(cameraUnit, Math.sin(apparentAltitude))
+      .normalize();
+  } else apparentSunDirection.copy(sunDirection);
+
+  localSun = {
+    trueAltitude,
+    apparentAltitude,
+    horizonDip: horizon,
+    observerAltitude,
+    density: atmosphere,
+  };
+
   const daylightOverride = mode === 'explore' && $('daylight').checked;
   const lightingSun = daylightOverride ? cameraUnit : sunDirection;
-  sunU.value.copy(lightingSun);
   sunL.position.copy(lightingSun).multiplyScalar(10);
-  const day = daylightOverride ? 1 : THREE.MathUtils.smoothstep(cameraUnit.dot(sunDirection), -0.12, 0.25);
-  background.setRGB(0.36, 0.58, 0.9).multiplyScalar(atmosphere * day);
+  const directSun = daylightOverride ? 1 : THREE.MathUtils.smoothstep(visibleSolarAltitude, -0.018, 0.09);
+  const twilight = THREE.MathUtils.smoothstep(trueAltitude, -18 * D2R, 2 * D2R);
+  const day = daylightOverride ? 1 : THREE.MathUtils.smoothstep(trueAltitude, -5 * D2R, 8 * D2R);
+
+  sunL.color.setRGB(...(daylightOverride ? [1, 1, 1] : transmission));
+  sunL.intensity = 3 * directSun * (0.2 + 0.8 * Math.max(...transmission));
+  hemi.color.setRGB(0.78, 0.88, 1.0);
+  hemi.groundColor.setRGB(0.05, 0.075, 0.1);
+  hemi.intensity = 0.035 + atmosphere * (0.08 + 0.38 * twilight);
+
+  // The dome uses true celestial data even if Explore's optional terrain
+  // daylight override is active; that switch should not turn a selected night
+  // into a fictitious daytime sky.
+  skyU.sun.value.copy(apparentSunDirection);
+  skyU.up.value.copy(cameraUnit);
+  skyU.density.value = atmosphere;
+  skyU.sunAltitude.value = trueAltitude;
+  skyU.sunTransmission.value.setRGB(...transmission);
+  sunBodyU.transmission.value.setRGB(...transmission);
+  sunBodyU.visibility.value = THREE.MathUtils.smoothstep(visibleSolarAltitude, -0.03, 0.02);
+
+  // This clear/fog color fills any momentary tile gaps; the analytic dome is
+  // the visible sky proper. It follows the same dimming progression.
+  background.setRGB(0.004, 0.011, 0.03).lerp(new THREE.Color(0.31, 0.57, 0.86), atmosphere * day);
   scene.background.copy(background);
   scene.fog.color.copy(background);
-  scene.fog.density = atmosphere * day * 0.003;
-  fadeU.value = THREE.MathUtils.smoothstep(altitude, 20, 600);
-  visU.value = 1 - atmosphere * day;
-  hemi.intensity = 0.25 + 0.15 * day;
+  scene.fog.density = atmosphere * (0.00015 + 0.0028 * day);
+  visU.value = 1 - clamp(atmosphere * THREE.MathUtils.smoothstep(trueAltitude, -9 * D2R, 5 * D2R), 0, 1);
+}
+
+function renderAtmosphereReadout() {
+  const relativeAltitude = localSun.apparentAltitude + localSun.horizonDip;
+  const altitude = localSun.observerAltitude;
+  const eyeHeight = altitude < 1
+    ? `${Math.round(altitude * 1000)} m`
+    : `${altitude < 100 ? altitude.toFixed(1) : Math.round(altitude)} km`;
+  const relation = `${Math.abs(degrees(relativeAltitude)).toFixed(1)}° ${relativeAltitude >= 0 ? 'above' : 'below'} local horizon`;
+  const dip = degrees(localSun.horizonDip);
+  const horizon = dip >= 0.05 ? ` · horizon ${dip.toFixed(1)}° lower at ${eyeHeight}` : ` · eye height ${eyeHeight}`;
+  const next = `Sun ${relation} · ${solarPhase(localSun.trueAltitude)}${horizon}`;
+  if (next !== atmosphereReadout) {
+    atmosphereReadout = next;
+    $('atmosphere-readout').textContent = next;
+  }
 }
 
 /* ---------- UI ---------- */
@@ -1776,6 +1920,8 @@ renderer.setAnimationLoop(() => {
   }
   updateNavigation(deltaTime);
   frameCamera();
+  updateEnvironment();
+  renderAtmosphereReadout();
   updateCelestialBodies();
   selectTiles();
   updateGeometry();
@@ -1789,8 +1935,6 @@ renderer.setAnimationLoop(() => {
     tile.mesh.position.copy(tile.center).sub(cameraPosition);
   }
   back.position.copy(cameraPosition).negate();
-  atm.position.copy(cameraPosition).negate();
-  updateEnvironment();
   renderer.render(scene, camera);
   if (frame % 8 === 0) {
     scheduleDailyEvents();

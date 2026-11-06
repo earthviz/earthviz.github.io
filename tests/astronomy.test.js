@@ -20,6 +20,12 @@ import {
   timeToMinutes,
   usnoOneDayUrl,
 } from '../src/solar-flow.js';
+import {
+  apparentSolarAltitude,
+  horizonDip,
+  solarPhase,
+  solarTransmission,
+} from '../src/sky-model.js';
 
 const D2R = Math.PI / 180;
 
@@ -103,4 +109,16 @@ test('physical radii produce realistic varying apparent diameters', () => {
   assert.ok(Math.abs(sunDiameter - 0.533) < 0.01);
   assert.ok(nearMoon > farMoon);
   assert.ok(farMoon > 0.48 && nearMoon < 0.57);
+});
+
+test('atmosphere model lowers the visible horizon and warms a low Sun', () => {
+  assert.equal(horizonDip(0), 0);
+  assert.ok(Math.abs(horizonDip(10) / D2R - 3.21) < 0.08);
+  const standardSunrise = -0.833 * D2R;
+  assert.ok(apparentSolarAltitude(standardSunrise) > -0.3 * D2R);
+  const lowSun = solarTransmission(0);
+  const highSun = solarTransmission(45 * D2R);
+  assert.ok(lowSun[0] > lowSun[2]);
+  assert.ok(highSun[2] > lowSun[2]);
+  assert.equal(solarPhase(-10 * D2R), 'Nautical twilight');
 });

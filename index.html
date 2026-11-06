@@ -39,6 +39,8 @@
           <div class="eyebrow">YOUR PERSPECTIVE</div>
           <div class="explore-imagery"><label for="src">Satellite imagery</label>
           <select id="src"><option value="eox">Sentinel-2 · Natural color</option><option value="esri">Esri · World Imagery</option></select></div>
+          <label class="switch-row city-overlay-switch" for="city-overlay">Cities & roads<input id="city-overlay" type="checkbox" role="switch"></label>
+          <small id="city-overlay-status" class="overlay-status" aria-live="polite">Off</small>
           <div class="field-label"><label for="det">Terrain detail</label><output id="detail-value" for="det">Balanced</output></div>
           <input id="det" type="range" min="1" max="6" step="1" value="4">
           <div class="range-labels"><span>Lighter</span><span>Sharper</span></div>
@@ -81,6 +83,7 @@
               <div id="sun-track" class="sun-track" role="img" aria-label="Daily sunlight timeline"><i class="sun-now" aria-hidden="true"></i></div>
               <div class="sun-events"><button id="jump-sunrise" type="button">↑ <span>Sunrise —</span></button><button id="jump-sunset" type="button">↓ <span>Sunset —</span></button></div>
               <div id="moon-events" class="moon-events">Moon data loading…</div>
+              <div id="atmosphere-readout" class="atmosphere-readout">Calculating atmospheric path…</div>
               <small id="sun-source"></small>
             </div>
           </section>
@@ -117,9 +120,9 @@
     </nav>
 
     <footer class="footer">
-      <details class="help"><summary>ⓘ <span>How to explore</span></summary><div>Drag to move · Scroll to zoom<br>Right-drag or Shift-drag to orbit<br>In Stargaze, drag to look and click a star to identify it<br>Arrow keys to move/look · + / − to zoom</div></details>
+      <details class="help"><summary>ⓘ <span>How to explore</span></summary><div>Left-drag to pan · Right-drag to orbit · Scroll to zoom<br>Middle-drag or Shift-drag to free-look<br>WASD to move · Q/E down/up · Arrow keys to look · + / − to zoom<br>Hold Shift for faster keyboard movement<br>In Stargaze, drag to look and click a star to identify it</div></details>
       <details class="credits"><summary id="credit-label">Map data & credits ↗</summary><div id="credit"></div></details>
     </footer>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="/src/cesium-main.js"></script>
   </body>
 </html>
