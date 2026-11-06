@@ -1,3 +1,5 @@
+import { parseCoordinates, formatCoordinates } from './coordinates.js';
+
 const $ = id => document.getElementById(id);
 const destinations = [
   { name: 'Mount Everest, Himalayas', lat: 27.9881, lng: 86.925 },
@@ -32,7 +34,7 @@ export function setupUI({ search, flyTo, zoom, home, north }) {
   }
   function choose(hit) {
     close();
-    input.value = hit.name;
+    if (!hit.keepInput) input.value = hit.name;
     $('clear-search').hidden = false;
     flyTo(hit);
     input.blur();
@@ -81,9 +83,9 @@ export function setupUI({ search, flyTo, zoom, home, north }) {
     input.setAttribute('aria-expanded', 'true');
   }
   function coordinates(query) {
-    const match = query.match(/^(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)$/);
-    return match && Math.abs(+match[1]) <= 90 && Math.abs(+match[2]) <= 180
-      ? { name: query, lat: +match[1], lng: +match[2] } : null;
+    const parsed = parseCoordinates(query);
+    if (!parsed || parsed.error) return parsed;
+    return { name: `Coordinates, ${formatCoordinates(parsed.lat, parsed.lng)}`, lat: parsed.lat, lng: parsed.lng, keepInput: true };
   }
   async function suggest(query, current) {
     controller = new AbortController();
@@ -115,6 +117,7 @@ export function setupUI({ search, flyTo, zoom, home, north }) {
     const query = input.value.trim();
     $('clear-search').hidden = !query;
     const coordinate = coordinates(query);
+    if (coordinate?.error) { show([], coordinate.error); return; }
     if (coordinate) { show([coordinate], 'Jump to coordinates'); return; }
     if (query.length < 3) { show(destinations.filter(hit => hit.name.toLowerCase().includes(query.toLowerCase())), query ? 'Keep typing to search places' : 'A little inspiration'); return; }
     show(destinations.filter(hit => hit.name.toLowerCase().includes(query.toLowerCase())), 'Finding places…');
@@ -141,6 +144,7 @@ export function setupUI({ search, flyTo, zoom, home, north }) {
     const query = input.value.trim();
     if (!query) { input.focus(); onInput(); return; }
     const coordinate = coordinates(query);
+    if (coordinate?.error) { show([], coordinate.error); return; }
     if (coordinate) { choose(coordinate); return; }
     stop();
     const current = revision;
@@ -182,4 +186,5 @@ export function setupUI({ search, flyTo, zoom, home, north }) {
   $('det').addEventListener('input', () => { $('detail-value').textContent = labels[+$('det').value - 1]; });
   $('terrain-zoom').addEventListener('input', () => { $('terrain-zoom-value').textContent = `z${$('terrain-zoom').value}`; });
   $('ex').addEventListener('input', () => { $('ex-value').textContent = `${(+$('ex').value).toFixed(1)}×`; });
+  $('terrain-mesh').addEventListener('input', () => { $('terrain-mesh-value').textContent = $('terrain-mesh').value; });
 }

@@ -101,6 +101,7 @@ document.body.prepend(globeContainer);
 let terrainProvider = new TerrariumTerrainProvider({
   flattenSea: $('flat').checked,
   maximumLevel: +$('terrain-zoom').value,
+  gridSize: +$('terrain-mesh').value,
 });
 const widget = new CesiumWidget(globeContainer, {
   baseLayer: false,
@@ -344,6 +345,7 @@ function replaceTerrain() {
   terrainProvider = new TerrariumTerrainProvider({
     flattenSea: $('flat').checked,
     maximumLevel: +$('terrain-zoom').value,
+    gridSize: +$('terrain-mesh').value,
   });
   widget.terrainProvider = terrainProvider;
   cityOverlay.setTerrainProvider(terrainProvider);
@@ -841,6 +843,7 @@ $('terrain-zoom').addEventListener('change', replaceTerrain);
 $('ex').addEventListener('input', () => { scene.verticalExaggeration = +$('ex').value; });
 $('ex').addEventListener('change', () => cityOverlay.invalidateTerrain());
 $('flat').addEventListener('change', replaceTerrain);
+$('terrain-mesh').addEventListener('change', replaceTerrain);
 $('tod').addEventListener('input', updateSun);
 $('sky-date').addEventListener('change', () => { updateSun(); scheduleDailyEvents(true); });
 $('pollution').addEventListener('input', updatePollutionFilter);

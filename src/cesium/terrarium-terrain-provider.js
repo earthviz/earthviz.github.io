@@ -35,6 +35,8 @@ export class TerrariumTerrainProvider {
     this.url = options.url ?? DEFAULT_URL;
     this.maximumLevel = options.maximumLevel ?? 15;
     this.flattenSea = options.flattenSea ?? true;
+    // Samples per tile edge. Higher values preserve more steep, narrow relief.
+    this.gridSize = options.gridSize ?? TERRAIN_GRID_SIZE;
     this.tilingScheme = new WebMercatorTilingScheme({ ellipsoid: Ellipsoid.WGS84 });
     this.errorEvent = new Event();
     this.credit = new Credit('Elevation: Mapzen Terrarium (AWS)');
@@ -47,7 +49,7 @@ export class TerrariumTerrainProvider {
     this.levelZeroMaximumGeometricError =
       TerrainProvider.getEstimatedLevelZeroGeometricErrorForAHeightmap(
         this.tilingScheme.ellipsoid,
-        TERRAIN_GRID_SIZE,
+        this.gridSize,
         this.tilingScheme.getNumberOfXTilesAtLevel(0),
       );
   }
@@ -71,14 +73,14 @@ export class TerrariumTerrainProvider {
         imagePixels(image),
         TERRARIUM_TILE_SIZE,
         TERRARIUM_TILE_SIZE,
-        { flattenSea: this.flattenSea },
+        { flattenSea: this.flattenSea, gridSize: this.gridSize },
       );
       image.close?.();
       const childTileMask = level >= this.maximumLevel || (level >= 5 && sampled.allWater) ? 0 : 15;
       return new HeightmapTerrainData({
         buffer: sampled.heights,
-        width: TERRAIN_GRID_SIZE,
-        height: TERRAIN_GRID_SIZE,
+        width: this.gridSize,
+        height: this.gridSize,
         childTileMask,
       });
     });
