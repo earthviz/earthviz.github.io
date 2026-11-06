@@ -1,9 +1,11 @@
 import '@cesium/engine/Source/Widget/CesiumWidget.css';
 import {
+  BoundingSphere,
   Cartesian2,
   Cartesian3,
   Cartographic,
   Color,
+  HeadingPitchRange,
   JulianDate,
 } from '@cesium/core';
 import {
@@ -81,7 +83,10 @@ globeContainer.id = 'earthviz-globe';
 globeContainer.setAttribute('aria-label', 'Interactive 3D globe');
 document.body.prepend(globeContainer);
 
-let terrainProvider = new TerrariumTerrainProvider({ flattenSea: $('flat').checked });
+let terrainProvider = new TerrariumTerrainProvider({
+  flattenSea: $('flat').checked,
+  maximumLevel: +$('terrain-zoom').value,
+});
 const widget = new CesiumWidget(globeContainer, {
   baseLayer: false,
   terrainProvider,
@@ -236,9 +241,12 @@ function setInitialCamera() {
 
 function flyToCoordinates(lat, lng, height = LOCAL_HEIGHT) {
   focus = { lat, lng };
-  camera.flyTo({
-    destination: Cartesian3.fromRadians(lng, lat, height),
-    orientation: { heading: 0, pitch: -48 * D2R, roll: 0 },
+  const cartographic = Cartographic.fromRadians(lng, lat);
+  const ground = globe.getHeight(cartographic) || 0;
+  const target = Cartesian3.fromRadians(lng, lat, ground);
+  const pitch = -48 * D2R;
+  camera.flyToBoundingSphere(new BoundingSphere(target, 0), {
+    offset: new HeadingPitchRange(0, pitch, height / -Math.sin(pitch)),
     duration: 2.2,
   });
 }
@@ -265,7 +273,10 @@ function setStargazeCamera() {
 }
 
 function replaceTerrain() {
-  terrainProvider = new TerrariumTerrainProvider({ flattenSea: $('flat').checked });
+  terrainProvider = new TerrariumTerrainProvider({
+    flattenSea: $('flat').checked,
+    maximumLevel: +$('terrain-zoom').value,
+  });
   widget.terrainProvider = terrainProvider;
   cityOverlay.setTerrainProvider(terrainProvider);
 }
@@ -622,6 +633,7 @@ for (const layer of ['buildings', 'roads']) {
   });
 }
 $('det').addEventListener('input', () => { globe.maximumScreenSpaceError = DETAIL_ERRORS[+$('det').value - 1]; });
+$('terrain-zoom').addEventListener('change', replaceTerrain);
 $('ex').addEventListener('input', () => { scene.verticalExaggeration = +$('ex').value; });
 $('ex').addEventListener('change', () => cityOverlay.invalidateTerrain());
 $('flat').addEventListener('change', replaceTerrain);

@@ -179,6 +179,7 @@ export function setupUI({ search, flyTo, zoom, home, north }) {
   };
   const labels = ['Minimal', 'Light', 'Moderate', 'Balanced', 'High', 'Maximum'];
   $('det').addEventListener('input', () => { $('detail-value').textContent = labels[+$('det').value - 1]; });
+  $('terrain-zoom').addEventListener('input', () => { $('terrain-zoom-value').textContent = `z${$('terrain-zoom').value}`; });
   $('ex').addEventListener('input', () => { $('ex-value').textContent = `${(+$('ex').value).toFixed(1)}×`; });
   document.querySelectorAll('.tool-panel').forEach(panel => panel.addEventListener('toggle', () => {
     if (panel.open && innerWidth <= 640) document.querySelectorAll('.tool-panel').forEach(other => { if (other !== panel) other.open = false; });

@@ -46,10 +46,13 @@
           <div class="field-label"><label for="det">Terrain detail</label><output id="detail-value" for="det">Balanced</output></div>
           <input id="det" type="range" min="1" max="6" step="1" value="4">
           <div class="range-labels"><span>Lighter</span><span>Sharper</span></div>
+          <div class="field-label"><label for="terrain-zoom">Terrain max zoom</label><output id="terrain-zoom-value" for="terrain-zoom">z14</output></div>
+          <input id="terrain-zoom" type="range" min="10" max="15" step="1" value="14">
+          <div class="range-labels"><span>z10</span><span>z15</span></div>
           <div class="field-label"><label for="ex">Elevation scale</label><output id="ex-value" for="ex">1.0×</output></div>
           <input id="ex" type="range" min="0.5" max="6" step="0.1" value="1">
           <label class="switch-row" for="flat">Smooth ocean surface<input id="flat" type="checkbox" role="switch" checked></label>
-          <p class="panel-note">Detail unfolds as you get closer.</p>
+          <p class="panel-note">z14 is the stable default; z15 remains available for maximum terrain detail.</p>
         </div>
       </details>
     </aside>
