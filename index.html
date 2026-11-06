@@ -39,8 +39,10 @@
           <div class="eyebrow">YOUR PERSPECTIVE</div>
           <div class="explore-imagery"><label for="src">Satellite imagery</label>
           <select id="src"><option value="eox">Sentinel-2 · Natural color</option><option value="esri">Esri · World Imagery</option></select></div>
-          <label class="switch-row city-overlay-switch" for="city-overlay">Cities & roads<input id="city-overlay" type="checkbox" role="switch"></label>
-          <small id="city-overlay-status" class="overlay-status" aria-live="polite">Off</small>
+          <label class="switch-row city-overlay-switch" for="overlay-buildings">3D buildings<input id="overlay-buildings" type="checkbox" role="switch"></label>
+          <small id="overlay-buildings-status" class="overlay-status" aria-live="polite">Off</small>
+          <label class="switch-row city-overlay-switch" for="overlay-roads">Roads<input id="overlay-roads" type="checkbox" role="switch"></label>
+          <small id="overlay-roads-status" class="overlay-status" aria-live="polite">Off</small>
           <div class="field-label"><label for="det">Terrain detail</label><output id="detail-value" for="det">Balanced</output></div>
           <input id="det" type="range" min="1" max="6" step="1" value="4">
           <div class="range-labels"><span>Lighter</span><span>Sharper</span></div>

@@ -74,7 +74,7 @@ let starPoints = null;
 let selectedStar = -1;
 let starEpochDay = '';
 let starStatus = 'Loading the Bright Star Catalogue…';
-let cityOverlayLoading = false;
+const overlayLoading = { buildings: false, roads: false };
 
 const globeContainer = document.createElement('div');
 globeContainer.id = 'earthviz-globe';
@@ -97,10 +97,10 @@ const cityOverlay = new OpenFreeMapOverlayController({
   scene,
   globe,
   terrainProvider,
-  onStatus: ({ kind, text }) => {
-    cityOverlayLoading = kind === 'loading';
-    $('city-overlay-status').dataset.kind = kind;
-    $('city-overlay-status').textContent = text;
+  onStatus: ({ layer, kind, text }) => {
+    overlayLoading[layer] = kind === 'loading';
+    $(`overlay-${layer}-status`).dataset.kind = kind;
+    $(`overlay-${layer}-status`).textContent = text;
   },
 });
 const naturalSun = new SunLight({ intensity: 2.7 });
@@ -273,7 +273,7 @@ function replaceTerrain() {
 function setCredit() {
   const key = mode === 'spacetime' ? 'gibs' : $('src').value;
   const provider = key === 'gibs' ? 'NASA GIBS' : (key === 'eox' ? 'EOX' : 'Esri');
-  const showsOpenFreeMap = $('city-overlay').checked;
+  const showsOpenFreeMap = $('overlay-buildings').checked || $('overlay-roads').checked;
   $('credit-label').textContent = `© ${provider} · Mapzen · OSM${showsOpenFreeMap ? ' · OpenFreeMap' : ''} ↗`;
   const imageryCredit = key === 'gibs'
     ? 'NASA EOSDIS GIBS · MODIS Terra and HLS Landsat/Sentinel'
@@ -613,12 +613,14 @@ function setMode(nextMode) {
 }
 
 $('src').addEventListener('change', () => { if (mode !== 'spacetime') refreshImagery(); });
-$('city-overlay').addEventListener('change', () => {
-  cityOverlay.setEnabled($('city-overlay').checked);
-  cityOverlay.setSuspended(mode === 'stargaze');
-  cityOverlay.update(focus, cameraHeight());
-  setCredit();
-});
+for (const layer of ['buildings', 'roads']) {
+  $(`overlay-${layer}`).addEventListener('change', () => {
+    cityOverlay.setLayerEnabled(layer, $(`overlay-${layer}`).checked);
+    cityOverlay.setSuspended(mode === 'stargaze');
+    cityOverlay.update(focus, cameraHeight());
+    setCredit();
+  });
+}
 $('det').addEventListener('input', () => { globe.maximumScreenSpaceError = DETAIL_ERRORS[+$('det').value - 1]; });
 $('ex').addEventListener('input', () => { scene.verticalExaggeration = +$('ex').value; });
 $('ex').addEventListener('change', () => cityOverlay.invalidateTerrain());
@@ -720,8 +722,8 @@ setupUI({
 function updateHud() {
   const loadingMessage = mode === 'stargaze'
     ? starStatus
-    : cityOverlayLoading
-      ? 'Loading 3D buildings and roads…'
+    : overlayLoading.buildings || overlayLoading.roads
+      ? `Loading 3D ${[overlayLoading.buildings && 'buildings', overlayLoading.roads && 'roads'].filter(Boolean).join(' and ')}…`
     : pendingTiles > 0
       ? (mode === 'spacetime' ? `Loading ${formatSpacetimeDate(spacetimeDate)}…` : 'Refining your view…')
       : mode === 'spacetime'

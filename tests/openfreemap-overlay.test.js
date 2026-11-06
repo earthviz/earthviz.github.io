@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  OVERLAY_LAYERS,
   buildingHeightRange,
   groupPolygonRings,
+  ringArea,
+  roadRank,
+  selectTop,
   tilePointToRadians,
   tileWindow,
 } from '../src/cesium/openfreemap-geometry.js';
@@ -39,4 +43,28 @@ test('creates a bounded tile window and wraps across the antimeridian', () => {
   assert.equal(window[0].distance, 0);
   assert.ok(window.some(tile => tile.x === 0));
   assert.ok(window.some(tile => tile.x === 7));
+});
+
+test('buildings load in a tighter window than roads', () => {
+  const buildings = tileWindow(0, 0, { zoom: 14, radius: OVERLAY_LAYERS.buildings.radius });
+  const roads = tileWindow(0, 0, { zoom: 14, radius: OVERLAY_LAYERS.roads.radius });
+  assert.equal(buildings.length, 9);
+  assert.equal(roads.length, 25);
+  assert.ok(OVERLAY_LAYERS.buildings.maxAltitude < OVERLAY_LAYERS.roads.maxAltitude);
+});
+
+test('ranks road classes and skips ones that are not drawn', () => {
+  assert.ok(roadRank('motorway') < roadRank('primary'));
+  assert.ok(roadRank('primary') < roadRank('minor'));
+  assert.equal(roadRank('service'), undefined);
+  assert.equal(roadRank('toString'), undefined);
+});
+
+test('selectTop keeps the largest footprints and is stable for ties', () => {
+  const square = size => [{ x: 0, y: 0 }, { x: size, y: 0 }, { x: size, y: size }, { x: 0, y: size }];
+  assert.equal(ringArea(square(10)), 100);
+  const items = [{ id: 'a', area: 5 }, { id: 'b', area: 50 }, { id: 'c', area: 50 }, { id: 'd', area: 1 }];
+  const kept = selectTop(items, 2, (x, y) => y.area - x.area);
+  assert.deepEqual(kept.map(item => item.id), ['b', 'c']);
+  assert.equal(selectTop(items, 10, () => 0), items);
 });

@@ -2,6 +2,36 @@ const MAX_MERCATOR_LATITUDE = 85.05112878 * Math.PI / 180;
 
 export const OPENFREEMAP_TILE_ZOOM = 14;
 
+// Buildings are the expensive layer (extruded, lit, per-building terrain
+// sampling), so they load in a tight window at low altitude. Roads are
+// ground-clamped lines and can cover a wider area from higher up.
+export const OVERLAY_LAYERS = {
+  buildings: { radius: 1, maxAltitude: 8_000, maxPerTile: 700 },
+  roads: { radius: 2, maxAltitude: 25_000, maxPerTile: 500 },
+};
+
+// Footprints below this (tile units², roughly 10 m² at z14) are never built.
+export const MIN_BUILDING_FOOTPRINT = 30;
+
+const ROAD_RANK = {
+  motorway: 0, trunk: 1, primary: 2, secondary: 3, tertiary: 4, minor: 5, street: 5,
+};
+
+// Lower is more important; undefined means the class is not drawn.
+export function roadRank(roadClass) {
+  return Object.hasOwn(ROAD_RANK, roadClass) ? ROAD_RANK[roadClass] : undefined;
+}
+
+export function ringArea(ring) {
+  return Math.abs(ringSignedArea(ring));
+}
+
+// Keeps the best `limit` items by comparator order. Stable for equal items.
+export function selectTop(items, limit, compare) {
+  if (items.length <= limit) return items;
+  return items.slice().sort(compare).slice(0, limit);
+}
+
 export function stripClosingVertex(ring) {
   if (
     ring.length > 1
