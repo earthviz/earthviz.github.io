@@ -45,6 +45,7 @@ import {
 } from './spacetime.js';
 import { apparentSolarAltitude, horizonDip, solarPhase } from './sky-model.js';
 import { TerrariumTerrainProvider } from './cesium/terrarium-terrain-provider.js';
+import { GIBS_CATEGORIES, fetchGibsCatalog, formatGibsTime, matchesCategory, snapTime, stepTime } from './gibs-catalog.js';
 import { DEFAULT_EXPLORE_IMAGERY, EXPLORE_IMAGERY, ImageryController } from './cesium/imagery.js';
 import { OpenFreeMapOverlayController } from './cesium/openfreemap-overlay.js';
 import {
@@ -67,6 +68,10 @@ const BSC5_URL = new URL('../bsc5.json', import.meta.url);
 
 let mode = 'explore';
 let spacetimeDate = previousUtcDate();
+let gaiaCatalog = null;
+let gaiaLayer = null;
+let gaiaTime = 0;
+let gaiaCategory = '';
 let nonSpacetimeObservationDay = '';
 let focus = { lat: INITIAL_VIEW.lat, lng: INITIAL_VIEW.lng };
 let pendingTiles = 0;
@@ -355,13 +360,15 @@ function replaceTerrain() {
 function setCredit() {
   const key = $('src').value;
   const definition = EXPLORE_IMAGERY[key] ?? EXPLORE_IMAGERY[DEFAULT_EXPLORE_IMAGERY];
-  const provider = mode === 'spacetime' ? 'NASA GIBS' : definition.provider;
+  const provider = mode === 'spacetime' || mode === 'gaia' ? 'NASA GIBS' : definition.provider;
   const showsOpenFreeMap = $('overlay-buildings').checked || $('overlay-roads').checked;
   $('credit-label').textContent = `© ${provider} · Mapzen · OSM${showsOpenFreeMap ? ' · OpenFreeMap' : ''} ↗`;
   const daily = GIBS_DAILY_SOURCES[$('spacetime-source').value] ?? GIBS_DAILY_SOURCES['modis-terra'];
-  const imageryCredit = mode === 'spacetime'
-    ? `NASA EOSDIS GIBS · ${daily.label} and HLS Landsat/Sentinel detail`
-    : definition.credit;
+  const imageryCredit = mode === 'gaia'
+    ? `NASA EOSDIS GIBS · ${gaiaLayer?.title ?? 'Blue Marble'}`
+    : mode === 'spacetime'
+      ? `NASA EOSDIS GIBS · ${daily.label} and HLS Landsat/Sentinel detail`
+      : definition.credit;
   const credit = $('credit');
   const externalLink = (label, href) => {
     const link = document.createElement('a');
@@ -381,7 +388,8 @@ function setCredit() {
 }
 
 function refreshImagery() {
-  if (mode === 'spacetime') imagery.showSpacetime(spacetimeDate, $('spacetime-source').value);
+  if (mode === 'gaia') imagery.showGaia(gaiaLayer, gaiaTime);
+  else if (mode === 'spacetime') imagery.showSpacetime(spacetimeDate, $('spacetime-source').value);
   else imagery.showExplore($('src').value);
   setCredit();
 }
@@ -806,6 +814,114 @@ function setSpacetimeDate(value) {
   }
 }
 
+/* ---------- Gaia: browse any NASA GIBS layer ---------- */
+const gaiaTimed = () => mode === 'gaia' && !!gaiaLayer?.periods.length;
+
+async function loadGaiaCatalog() {
+  if (gaiaCatalog) return;
+  gaiaCatalog = [];
+  $('gaia-count').textContent = 'Loading NASA catalog…';
+  try {
+    gaiaCatalog = await fetchGibsCatalog(privacyFetch);
+    $('gaia-count').textContent = `${gaiaCatalog.length} NASA GIBS layers`;
+    renderGaiaList();
+  } catch {
+    gaiaCatalog = null;
+    $('gaia-count').textContent = 'Catalog unavailable — reopen Gaia to retry';
+  }
+}
+
+function renderGaiaList() {
+  const terms = $('gaia-search').value.toLowerCase().split(/\s+/).filter(Boolean);
+  const hits = (gaiaCatalog ?? []).filter(l => matchesCategory(l, gaiaCategory) && terms.every(t => `${l.title} ${l.id}`.toLowerCase().includes(t)));
+  $('gaia-list').replaceChildren(...hits.slice(0, 150).map(layer => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'gaia-row';
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', String(layer === gaiaLayer));
+    const title = document.createElement('strong');
+    title.textContent = layer.title;
+    const meta = document.createElement('small');
+    meta.textContent = layer.periods.length ? `◷ ${layer.id}` : layer.id;
+    row.append(title, meta);
+    row.onclick = () => selectGaiaLayer(layer);
+    return row;
+  }));
+  if (hits.length > 150) {
+    const more = document.createElement('small');
+    more.className = 'gaia-more';
+    more.textContent = `${hits.length - 150} more — refine your search`;
+    $('gaia-list').append(more);
+  }
+}
+
+function selectGaiaLayer(layer) {
+  gaiaLayer = layer;
+  gaiaTime = layer.defaultTime ?? 0;
+  $('spacetime').hidden = !gaiaTimed();
+  syncGaiaTimeline();
+  renderGaiaList();
+  refreshImagery();
+}
+
+function setGaiaTime(ms) {
+  if (!gaiaTimed() || !Number.isFinite(ms)) return;
+  const next = snapTime(ms, gaiaLayer.periods);
+  if (next === gaiaTime) return;
+  gaiaTime = next;
+  syncGaiaTimeline();
+  refreshImagery();
+}
+
+function syncGaiaTimeline() {
+  if (!gaiaTimed()) return;
+  const { periods, title } = gaiaLayer;
+  const intraday = periods.some(p => p.intraday);
+  $('spacetime-label').textContent = `${title} · ${formatGibsTime(gaiaTime, intraday).replace('T', ' ').replace('Z', ' UTC')}`;
+  $('spacetime-date').min = formatGibsTime(periods[0].start).slice(0, 10);
+  $('spacetime-date').max = formatGibsTime(periods.at(-1).end).slice(0, 10);
+  $('spacetime-date').value = formatGibsTime(gaiaTime).slice(0, 10);
+  // Neighbouring observations, reusing the Spacetime day-strip look.
+  const times = [gaiaTime];
+  for (let t = gaiaTime, i = 0; i < 12; i++) { const n = stepTime(t, periods, -1); if (n === t) break; times.unshift(t = n); }
+  for (let t = gaiaTime, i = 0; i < 12; i++) { const n = stepTime(t, periods, 1); if (n === t) break; times.push(t = n); }
+  $('spacetime-days').replaceChildren(...times.map(t => {
+    const date = new Date(t);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'spacetime-day';
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', String(t === gaiaTime));
+    const top = document.createElement('small');
+    const big = document.createElement('strong');
+    const bottom = document.createElement('span');
+    top.textContent = String(date.getUTCFullYear());
+    big.textContent = intraday ? date.toISOString().slice(11, 16) : String(date.getUTCDate());
+    bottom.textContent = date.toLocaleDateString(undefined, { timeZone: 'UTC', month: 'short' });
+    button.append(top, big, bottom);
+    button.onclick = () => setGaiaTime(t);
+    return button;
+  }));
+  const active = $('spacetime-days').querySelector('[aria-selected="true"]');
+  requestAnimationFrame(() => active?.scrollIntoView({ inline: 'center', block: 'nearest' }));
+}
+
+$('gaia-search').addEventListener('input', renderGaiaList);
+$('gaia-chips').replaceChildren(...['', ...GIBS_CATEGORIES.map(([label]) => label)].map(label => {
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'gaia-chip';
+  chip.textContent = label || 'All';
+  chip.setAttribute('aria-pressed', String(label === gaiaCategory));
+  chip.onclick = () => {
+    gaiaCategory = label;
+    for (const c of $('gaia-chips').children) c.setAttribute('aria-pressed', String(c === chip));
+    renderGaiaList();
+  };
+  return chip;
+}));
+
 function setMode(nextMode) {
   if (mode === nextMode) return;
   const previousMode = mode;
@@ -839,8 +955,11 @@ function setMode(nextMode) {
   document.body.classList.toggle('spacetime-mode', isSpacetime);
   document.body.classList.toggle('stargaze-mode', isStargazing);
   document.body.classList.toggle('explore-mode', mode === 'explore');
-  $('spacetime').hidden = !isSpacetime;
-  for (const candidate of ['explore', 'spacetime', 'stargaze']) {
+  document.body.classList.toggle('gaia-mode', mode === 'gaia');
+  if (mode === 'gaia') loadGaiaCatalog();
+  $('spacetime').hidden = !(isSpacetime || gaiaTimed());
+  syncGaiaTimeline();
+  for (const candidate of ['explore', 'spacetime', 'gaia', 'stargaze']) {
     const active = mode === candidate;
     $(`mode-${candidate}`).classList.toggle('active', active);
     $(`mode-${candidate}`).setAttribute('aria-pressed', String(active));
@@ -853,7 +972,7 @@ function setMode(nextMode) {
   scheduleDailyEvents(true);
 }
 
-$('src').addEventListener('change', () => { if (mode !== 'spacetime') refreshImagery(); });
+$('src').addEventListener('change', () => { if (mode === 'explore') refreshImagery(); });
 $('spacetime-source').addEventListener('change', () => {
   const minimum = GIBS_DAILY_SOURCES[$('spacetime-source').value].startDate;
   $('spacetime-date').min = minimum;
@@ -909,12 +1028,17 @@ for (const id of ['jump-sunrise', 'jump-sunset']) $(id).addEventListener('click'
 });
 $('mode-explore').onclick = () => setMode('explore');
 $('mode-spacetime').onclick = () => setMode('spacetime');
+$('mode-gaia').onclick = () => setMode('gaia');
 $('mode-stargaze').onclick = () => setMode('stargaze');
 $('spacetime-date').min = GIBS_DAILY_SOURCES[$('spacetime-source').value].startDate;
 $('spacetime-date').max = dayToIso(lastGibsDay);
-$('spacetime-form').onsubmit = event => { event.preventDefault(); setSpacetimeDate($('spacetime-date').value); };
-$('spacetime-prev').onclick = () => setSpacetimeDate(dayToIso(isoToDay(spacetimeDate) - 1));
-$('spacetime-next').onclick = () => setSpacetimeDate(dayToIso(isoToDay(spacetimeDate) + 1));
+$('spacetime-form').onsubmit = event => {
+  event.preventDefault();
+  if (mode === 'gaia') setGaiaTime(Date.parse(`${$('spacetime-date').value}T00:00:00Z`));
+  else setSpacetimeDate($('spacetime-date').value);
+};
+$('spacetime-prev').onclick = () => { if (mode === 'gaia') setGaiaTime(stepTime(gaiaTime, gaiaLayer.periods, -1)); else setSpacetimeDate(dayToIso(isoToDay(spacetimeDate) - 1)); };
+$('spacetime-next').onclick = () => { if (mode === 'gaia') setGaiaTime(stepTime(gaiaTime, gaiaLayer.periods, 1)); else setSpacetimeDate(dayToIso(isoToDay(spacetimeDate) + 1)); };
 $('spacetime-minimize').onclick = () => {
   const minimized = $('spacetime').classList.toggle('minimized');
   $('spacetime-minimize').setAttribute('aria-expanded', String(!minimized));
@@ -1003,7 +1127,7 @@ setupUI({
 });
 
 function updateHud() {
-  $('spacetime-loading').hidden = mode !== 'spacetime' || pendingTiles === 0;
+  $('spacetime-loading').hidden = (mode !== 'spacetime' && mode !== 'gaia') || pendingTiles === 0;
   $('spacetime-loading').textContent = pendingTiles > 0 ? 'Loading NASA GIBS tiles…' : '';
   $('compass-needle').style.transform = `rotate(${-camera.heading}rad)`;
 }

@@ -38,6 +38,7 @@
       <div class="mode-switch" role="group" aria-label="Viewing mode">
         <button id="mode-explore" class="mode-button active" type="button" aria-pressed="true">Explore</button>
         <button id="mode-spacetime" class="mode-button" type="button" aria-pressed="false"><span aria-hidden="true">◷</span> Spacetime</button>
+        <button id="mode-gaia" class="mode-button" type="button" aria-pressed="false"><span aria-hidden="true">◍</span> Gaia</button>
         <button id="mode-stargaze" class="mode-button" type="button" aria-pressed="false"><span aria-hidden="true">✦</span> Stargaze</button>
       </div>
       <div class="search-shell">
@@ -57,6 +58,15 @@
     </header>
 
     <aside class="explore-controls" aria-label="Explore controls">
+      <details class="tool-panel gaia-browser" id="gaia-browser" open>
+        <summary><span><strong>Gaia</strong><small id="gaia-count">NASA GIBS layers</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
+        <div class="panel-content">
+          <label class="sr-only" for="gaia-search">Search NASA GIBS layers</label>
+          <input id="gaia-search" type="search" placeholder="Search layers (clouds, NDVI, fires…)" autocomplete="off" spellcheck="false">
+          <div id="gaia-chips" class="gaia-chips" role="group" aria-label="Layer categories"></div>
+          <div id="gaia-list" class="gaia-list" role="listbox" aria-label="NASA GIBS layers"></div>
+        </div>
+      </details>
       <details class="tool-panel" id="tiles-panel">
         <summary><span><strong>Tiles</strong><small>Imagery and loading</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
         <div class="panel-content">

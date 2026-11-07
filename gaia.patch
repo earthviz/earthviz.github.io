@@ -1,0 +1,481 @@
+diff --git a/index.html b/index.html
+index d8e32d7..52e1130 100644
+--- a/index.html
++++ b/index.html
+@@ -38,6 +38,7 @@
+       <div class="mode-switch" role="group" aria-label="Viewing mode">
+         <button id="mode-explore" class="mode-button active" type="button" aria-pressed="true">Explore</button>
+         <button id="mode-spacetime" class="mode-button" type="button" aria-pressed="false"><span aria-hidden="true">◷</span> Spacetime</button>
++        <button id="mode-gaia" class="mode-button" type="button" aria-pressed="false"><span aria-hidden="true">◍</span> Gaia</button>
+         <button id="mode-stargaze" class="mode-button" type="button" aria-pressed="false"><span aria-hidden="true">✦</span> Stargaze</button>
+       </div>
+       <div class="search-shell">
+@@ -57,6 +58,15 @@
+     </header>
+ 
+     <aside class="explore-controls" aria-label="Explore controls">
++      <details class="tool-panel gaia-browser" id="gaia-browser" open>
++        <summary><span><strong>Gaia</strong><small id="gaia-count">NASA GIBS layers</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
++        <div class="panel-content">
++          <label class="sr-only" for="gaia-search">Search NASA GIBS layers</label>
++          <input id="gaia-search" type="search" placeholder="Search layers (clouds, NDVI, fires…)" autocomplete="off" spellcheck="false">
++          <div id="gaia-chips" class="gaia-chips" role="group" aria-label="Layer categories"></div>
++          <div id="gaia-list" class="gaia-list" role="listbox" aria-label="NASA GIBS layers"></div>
++        </div>
++      </details>
+       <details class="tool-panel" id="tiles-panel">
+         <summary><span><strong>Tiles</strong><small>Imagery and loading</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
+         <div class="panel-content">
+diff --git a/src/cesium/imagery.js b/src/cesium/imagery.js
+index a46966a..4fa65e1 100644
+--- a/src/cesium/imagery.js
++++ b/src/cesium/imagery.js
+@@ -11,6 +11,7 @@ import {
+   HLS_NATIVE_MAX_ZOOM,
+   HLS_S30_LAYER,
+ } from '../spacetime.js';
++import { gaiaTileUrl } from '../gibs-catalog.js';
+ 
+ export const EXPLORE_IMAGERY = {
+   esri: {
+@@ -117,6 +118,17 @@ export function createSpacetimeLayers(date, source = 'modis-terra') {
+   return [modis, landsat, sentinel];
+ }
+ 
++export function createGaiaLayers(layer, time) {
++  // Blue Marble underneath so transparent overlays (clouds, aerosols) read well.
++  const overlay = new ImageryLayer(templateProvider({
++    url: gaiaTileUrl(layer, time),
++    maximumLevel: layer.maxLevel,
++    credit: `NASA EOSDIS GIBS · ${layer.title}`,
++    hasAlphaChannel: layer.format === 'image/png',
++  }), { maximumAnisotropy: 8 });
++  return [...createExploreLayers('nasa-blue-marble'), overlay];
++}
++
+ export class ImageryController {
+   constructor(globe) {
+     this.globe = globe;
+@@ -134,6 +146,10 @@ export class ImageryController {
+     this.replace(createExploreLayers(source));
+   }
+ 
++  showGaia(layer, time) {
++    this.replace(layer ? createGaiaLayers(layer, time) : createExploreLayers('nasa-blue-marble'));
++  }
++
+   showSpacetime(date, source) {
+     // Removing first guarantees that neither Explore nor the previous date is
+     // visible while the selected date starts loading.
+diff --git a/src/cesium-main.js b/src/cesium-main.js
+index d9459b6..260d208 100644
+--- a/src/cesium-main.js
++++ b/src/cesium-main.js
+@@ -45,6 +45,7 @@ import {
+ } from './spacetime.js';
+ import { apparentSolarAltitude, horizonDip, solarPhase } from './sky-model.js';
+ import { TerrariumTerrainProvider } from './cesium/terrarium-terrain-provider.js';
++import { GIBS_CATEGORIES, fetchGibsCatalog, formatGibsTime, matchesCategory, snapTime, stepTime } from './gibs-catalog.js';
+ import { DEFAULT_EXPLORE_IMAGERY, EXPLORE_IMAGERY, ImageryController } from './cesium/imagery.js';
+ import { OpenFreeMapOverlayController } from './cesium/openfreemap-overlay.js';
+ import {
+@@ -67,6 +68,10 @@ const BSC5_URL = new URL('../bsc5.json', import.meta.url);
+ 
+ let mode = 'explore';
+ let spacetimeDate = previousUtcDate();
++let gaiaCatalog = null;
++let gaiaLayer = null;
++let gaiaTime = 0;
++let gaiaCategory = '';
+ let nonSpacetimeObservationDay = '';
+ let focus = { lat: INITIAL_VIEW.lat, lng: INITIAL_VIEW.lng };
+ let pendingTiles = 0;
+@@ -355,13 +360,15 @@ function replaceTerrain() {
+ function setCredit() {
+   const key = $('src').value;
+   const definition = EXPLORE_IMAGERY[key] ?? EXPLORE_IMAGERY[DEFAULT_EXPLORE_IMAGERY];
+-  const provider = mode === 'spacetime' ? 'NASA GIBS' : definition.provider;
++  const provider = mode === 'spacetime' || mode === 'gaia' ? 'NASA GIBS' : definition.provider;
+   const showsOpenFreeMap = $('overlay-buildings').checked || $('overlay-roads').checked;
+   $('credit-label').textContent = `© ${provider} · Mapzen · OSM${showsOpenFreeMap ? ' · OpenFreeMap' : ''} ↗`;
+   const daily = GIBS_DAILY_SOURCES[$('spacetime-source').value] ?? GIBS_DAILY_SOURCES['modis-terra'];
+-  const imageryCredit = mode === 'spacetime'
+-    ? `NASA EOSDIS GIBS · ${daily.label} and HLS Landsat/Sentinel detail`
+-    : definition.credit;
++  const imageryCredit = mode === 'gaia'
++    ? `NASA EOSDIS GIBS · ${gaiaLayer?.title ?? 'Blue Marble'}`
++    : mode === 'spacetime'
++      ? `NASA EOSDIS GIBS · ${daily.label} and HLS Landsat/Sentinel detail`
++      : definition.credit;
+   const credit = $('credit');
+   const externalLink = (label, href) => {
+     const link = document.createElement('a');
+@@ -381,7 +388,8 @@ function setCredit() {
+ }
+ 
+ function refreshImagery() {
+-  if (mode === 'spacetime') imagery.showSpacetime(spacetimeDate, $('spacetime-source').value);
++  if (mode === 'gaia') imagery.showGaia(gaiaLayer, gaiaTime);
++  else if (mode === 'spacetime') imagery.showSpacetime(spacetimeDate, $('spacetime-source').value);
+   else imagery.showExplore($('src').value);
+   setCredit();
+ }
+@@ -806,6 +814,114 @@ function setSpacetimeDate(value) {
+   }
+ }
+ 
++/* ---------- Gaia: browse any NASA GIBS layer ---------- */
++const gaiaTimed = () => mode === 'gaia' && !!gaiaLayer?.periods.length;
++
++async function loadGaiaCatalog() {
++  if (gaiaCatalog) return;
++  gaiaCatalog = [];
++  $('gaia-count').textContent = 'Loading NASA catalog…';
++  try {
++    gaiaCatalog = await fetchGibsCatalog(privacyFetch);
++    $('gaia-count').textContent = `${gaiaCatalog.length} NASA GIBS layers`;
++    renderGaiaList();
++  } catch {
++    gaiaCatalog = null;
++    $('gaia-count').textContent = 'Catalog unavailable — reopen Gaia to retry';
++  }
++}
++
++function renderGaiaList() {
++  const terms = $('gaia-search').value.toLowerCase().split(/\s+/).filter(Boolean);
++  const hits = (gaiaCatalog ?? []).filter(l => matchesCategory(l, gaiaCategory) && terms.every(t => `${l.title} ${l.id}`.toLowerCase().includes(t)));
++  $('gaia-list').replaceChildren(...hits.slice(0, 150).map(layer => {
++    const row = document.createElement('button');
++    row.type = 'button';
++    row.className = 'gaia-row';
++    row.setAttribute('role', 'option');
++    row.setAttribute('aria-selected', String(layer === gaiaLayer));
++    const title = document.createElement('strong');
++    title.textContent = layer.title;
++    const meta = document.createElement('small');
++    meta.textContent = layer.periods.length ? `◷ ${layer.id}` : layer.id;
++    row.append(title, meta);
++    row.onclick = () => selectGaiaLayer(layer);
++    return row;
++  }));
++  if (hits.length > 150) {
++    const more = document.createElement('small');
++    more.className = 'gaia-more';
++    more.textContent = `${hits.length - 150} more — refine your search`;
++    $('gaia-list').append(more);
++  }
++}
++
++function selectGaiaLayer(layer) {
++  gaiaLayer = layer;
++  gaiaTime = layer.defaultTime ?? 0;
++  $('spacetime').hidden = !gaiaTimed();
++  syncGaiaTimeline();
++  renderGaiaList();
++  refreshImagery();
++}
++
++function setGaiaTime(ms) {
++  if (!gaiaTimed() || !Number.isFinite(ms)) return;
++  const next = snapTime(ms, gaiaLayer.periods);
++  if (next === gaiaTime) return;
++  gaiaTime = next;
++  syncGaiaTimeline();
++  refreshImagery();
++}
++
++function syncGaiaTimeline() {
++  if (!gaiaTimed()) return;
++  const { periods, title } = gaiaLayer;
++  const intraday = periods.some(p => p.intraday);
++  $('spacetime-label').textContent = `${title} · ${formatGibsTime(gaiaTime, intraday).replace('T', ' ').replace('Z', ' UTC')}`;
++  $('spacetime-date').min = formatGibsTime(periods[0].start).slice(0, 10);
++  $('spacetime-date').max = formatGibsTime(periods.at(-1).end).slice(0, 10);
++  $('spacetime-date').value = formatGibsTime(gaiaTime).slice(0, 10);
++  // Neighbouring observations, reusing the Spacetime day-strip look.
++  const times = [gaiaTime];
++  for (let t = gaiaTime, i = 0; i < 12; i++) { const n = stepTime(t, periods, -1); if (n === t) break; times.unshift(t = n); }
++  for (let t = gaiaTime, i = 0; i < 12; i++) { const n = stepTime(t, periods, 1); if (n === t) break; times.push(t = n); }
++  $('spacetime-days').replaceChildren(...times.map(t => {
++    const date = new Date(t);
++    const button = document.createElement('button');
++    button.type = 'button';
++    button.className = 'spacetime-day';
++    button.setAttribute('role', 'option');
++    button.setAttribute('aria-selected', String(t === gaiaTime));
++    const top = document.createElement('small');
++    const big = document.createElement('strong');
++    const bottom = document.createElement('span');
++    top.textContent = String(date.getUTCFullYear());
++    big.textContent = intraday ? date.toISOString().slice(11, 16) : String(date.getUTCDate());
++    bottom.textContent = date.toLocaleDateString(undefined, { timeZone: 'UTC', month: 'short' });
++    button.append(top, big, bottom);
++    button.onclick = () => setGaiaTime(t);
++    return button;
++  }));
++  const active = $('spacetime-days').querySelector('[aria-selected="true"]');
++  requestAnimationFrame(() => active?.scrollIntoView({ inline: 'center', block: 'nearest' }));
++}
++
++$('gaia-search').addEventListener('input', renderGaiaList);
++$('gaia-chips').replaceChildren(...['', ...GIBS_CATEGORIES.map(([label]) => label)].map(label => {
++  const chip = document.createElement('button');
++  chip.type = 'button';
++  chip.className = 'gaia-chip';
++  chip.textContent = label || 'All';
++  chip.setAttribute('aria-pressed', String(label === gaiaCategory));
++  chip.onclick = () => {
++    gaiaCategory = label;
++    for (const c of $('gaia-chips').children) c.setAttribute('aria-pressed', String(c === chip));
++    renderGaiaList();
++  };
++  return chip;
++}));
++
+ function setMode(nextMode) {
+   if (mode === nextMode) return;
+   const previousMode = mode;
+@@ -839,8 +955,11 @@ function setMode(nextMode) {
+   document.body.classList.toggle('spacetime-mode', isSpacetime);
+   document.body.classList.toggle('stargaze-mode', isStargazing);
+   document.body.classList.toggle('explore-mode', mode === 'explore');
+-  $('spacetime').hidden = !isSpacetime;
+-  for (const candidate of ['explore', 'spacetime', 'stargaze']) {
++  document.body.classList.toggle('gaia-mode', mode === 'gaia');
++  if (mode === 'gaia') loadGaiaCatalog();
++  $('spacetime').hidden = !(isSpacetime || gaiaTimed());
++  syncGaiaTimeline();
++  for (const candidate of ['explore', 'spacetime', 'gaia', 'stargaze']) {
+     const active = mode === candidate;
+     $(`mode-${candidate}`).classList.toggle('active', active);
+     $(`mode-${candidate}`).setAttribute('aria-pressed', String(active));
+@@ -853,7 +972,7 @@ function setMode(nextMode) {
+   scheduleDailyEvents(true);
+ }
+ 
+-$('src').addEventListener('change', () => { if (mode !== 'spacetime') refreshImagery(); });
++$('src').addEventListener('change', () => { if (mode === 'explore') refreshImagery(); });
+ $('spacetime-source').addEventListener('change', () => {
+   const minimum = GIBS_DAILY_SOURCES[$('spacetime-source').value].startDate;
+   $('spacetime-date').min = minimum;
+@@ -909,12 +1028,17 @@ for (const id of ['jump-sunrise', 'jump-sunset']) $(id).addEventListener('click'
+ });
+ $('mode-explore').onclick = () => setMode('explore');
+ $('mode-spacetime').onclick = () => setMode('spacetime');
++$('mode-gaia').onclick = () => setMode('gaia');
+ $('mode-stargaze').onclick = () => setMode('stargaze');
+ $('spacetime-date').min = GIBS_DAILY_SOURCES[$('spacetime-source').value].startDate;
+ $('spacetime-date').max = dayToIso(lastGibsDay);
+-$('spacetime-form').onsubmit = event => { event.preventDefault(); setSpacetimeDate($('spacetime-date').value); };
+-$('spacetime-prev').onclick = () => setSpacetimeDate(dayToIso(isoToDay(spacetimeDate) - 1));
+-$('spacetime-next').onclick = () => setSpacetimeDate(dayToIso(isoToDay(spacetimeDate) + 1));
++$('spacetime-form').onsubmit = event => {
++  event.preventDefault();
++  if (mode === 'gaia') setGaiaTime(Date.parse(`${$('spacetime-date').value}T00:00:00Z`));
++  else setSpacetimeDate($('spacetime-date').value);
++};
++$('spacetime-prev').onclick = () => { if (mode === 'gaia') setGaiaTime(stepTime(gaiaTime, gaiaLayer.periods, -1)); else setSpacetimeDate(dayToIso(isoToDay(spacetimeDate) - 1)); };
++$('spacetime-next').onclick = () => { if (mode === 'gaia') setGaiaTime(stepTime(gaiaTime, gaiaLayer.periods, 1)); else setSpacetimeDate(dayToIso(isoToDay(spacetimeDate) + 1)); };
+ $('spacetime-minimize').onclick = () => {
+   const minimized = $('spacetime').classList.toggle('minimized');
+   $('spacetime-minimize').setAttribute('aria-expanded', String(!minimized));
+@@ -1003,7 +1127,7 @@ setupUI({
+ });
+ 
+ function updateHud() {
+-  $('spacetime-loading').hidden = mode !== 'spacetime' || pendingTiles === 0;
++  $('spacetime-loading').hidden = (mode !== 'spacetime' && mode !== 'gaia') || pendingTiles === 0;
+   $('spacetime-loading').textContent = pendingTiles > 0 ? 'Loading NASA GIBS tiles…' : '';
+   $('compass-needle').style.transform = `rotate(${-camera.heading}rad)`;
+ }
+diff --git a/b/src/gibs-catalog.js b/src/gibs-catalog.js
+new file mode 100644
+index 0000000..4411ac9
+--- /dev/null
++++ b/src/gibs-catalog.js
+@@ -0,0 +1,114 @@
++// NASA GIBS (Gaia mode): layer catalog from WMTS GetCapabilities + time stepping.
++export const GIBS_CAPABILITIES_URL = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/wmts.cgi?SERVICE=WMTS&request=GetCapabilities';
++const MAX_CAPABILITIES_BYTES = 40_000_000;
++const PERIOD = /^(.+?)\/(.+?)\/P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/;
++
++// "2012-05-08/2013-05-29/P1D" (comma-separated for several ranges) → periods.
++export function parsePeriods(values) {
++  const periods = [];
++  for (const raw of values.flatMap(v => String(v).split(','))) {
++    const m = PERIOD.exec(raw.trim());
++    if (!m) continue;
++    const start = Date.parse(m[1].length === 10 ? `${m[1]}T00:00:00Z` : m[1]);
++    const end = Date.parse(m[2].length === 10 ? `${m[2]}T00:00:00Z` : m[2]);
++    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
++    const [y, mo, w, d, h, mi, s] = m.slice(3).map(n => +n || 0);
++    const ms = ((w * 7 + d) * 86400 + h * 3600 + mi * 60 + s) * 1000;
++    if (!y && !mo && !ms) continue;
++    periods.push({ start, end, months: y * 12 + mo, ms, intraday: !!(h || mi || s) });
++  }
++  return periods.sort((a, b) => a.start - b.start);
++}
++
++function addStep(ms, p, n) {
++  const d = new Date(ms);
++  if (p.months) d.setUTCMonth(d.getUTCMonth() + p.months * n);
++  return d.getTime() + p.ms * n;
++}
++
++// Nearest valid observation time at or before `ms` (or the first one).
++export function snapTime(ms, periods) {
++  if (!periods.length) return ms;
++  let p = periods.find(q => ms >= q.start && ms <= q.end);
++  if (!p) return ms < periods[0].start ? periods[0].start : snapTime(periods.at(-1).end, periods);
++  if (!p.months) return Math.min(p.end, p.start + Math.floor((ms - p.start) / p.ms) * p.ms);
++  let t = p.start;
++  while (true) {
++    const next = addStep(t, p, 1);
++    if (next > ms || next > p.end) return t;
++    t = next;
++  }
++}
++
++export function stepTime(ms, periods, dir) {
++  if (!periods.length) return ms;
++  const t = snapTime(ms, periods);
++  const i = periods.findIndex(q => t >= q.start && t <= q.end);
++  const p = periods[i];
++  const next = addStep(t, p, dir);
++  if (next >= p.start && next <= p.end) return next;
++  if (dir > 0) return periods[i + 1]?.start ?? t;
++  return periods[i - 1]?.end ?? t;
++}
++
++export function formatGibsTime(ms, intraday) {
++  const iso = new Date(ms).toISOString();
++  return intraday ? `${iso.slice(0, 19)}Z` : iso.slice(0, 10);
++}
++
++export function gaiaTileUrl(layer, time) {
++  const ext = layer.format === 'image/jpeg' ? 'jpeg' : 'png';
++  const when = layer.periods.length ? `${formatGibsTime(time, layer.periods.some(p => p.intraday))}/` : '';
++  return `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${layer.id}/default/${when}${layer.tileMatrixSet}/{z}/{y}/{x}.${ext}`;
++}
++
++export const GIBS_CATEGORIES = [
++  ['Clouds', /cloud/i],
++  ['Vegetation', /ndvi|evi\b|vegetation|leaf_area|lai\b|fpar|canopy|greenness/i],
++  ['Fires', /fire|thermal_anomal|firms/i],
++  ['Air', /aerosol|optical_depth|aod|no2|so2|carbon|ozone|methane|dust|smoke|air_quality/i],
++  ['Ocean', /sea_surface|sst|chlorophyll|ocean|bathymetry|salinity|sea_level|currents/i],
++  ['Snow & ice', /snow|sea_ice|ice_|glacier|ice\b/i],
++  ['Heat', /temperature|land_surface_temp|lst\b|heat/i],
++  ['Rain', /precip|rain|imerg|flood|water_vapor|moisture/i],
++  ['Night', /night|black_marble|lights/i],
++];
++
++export function matchesCategory(layer, name) {
++  const entry = GIBS_CATEGORIES.find(([label]) => label === name);
++  return !entry || entry[1].test(`${layer.id} ${layer.title}`);
++}
++
++const kids = (el, name) => [...el.getElementsByTagNameNS('*', name)];
++const text = (el, name) => kids(el, name)[0]?.textContent.trim() ?? '';
++
++export function parseCapabilities(xml) {
++  const doc = new DOMParser().parseFromString(xml, 'application/xml');
++  const layers = [];
++  for (const el of kids(doc, 'Layer')) {
++    const id = text(el, 'Identifier');
++    const formats = kids(el, 'Format').map(f => f.textContent.trim());
++    const format = formats.find(f => f === 'image/png') ?? formats.find(f => f === 'image/jpeg');
++    const tms = kids(el, 'TileMatrixSet').map(t => t.textContent.trim()).find(t => /^GoogleMapsCompatible_Level\d+$/.test(t));
++    if (!id || !format || !tms) continue; // skips vector tiles and non-3857 sets
++    const dim = kids(el, 'Dimension').find(d => text(d, 'Identifier').toLowerCase() === 'time');
++    const periods = dim ? parsePeriods(kids(dim, 'Value').map(v => v.textContent)) : [];
++    const def = dim ? Date.parse(text(dim, 'Default').length === 10 ? `${text(dim, 'Default')}T00:00:00Z` : text(dim, 'Default')) : NaN;
++    layers.push({
++      id, format, tileMatrixSet: tms,
++      title: kids(el, 'Title').find(t => t.parentNode === el)?.textContent.trim() || id,
++      maxLevel: +tms.match(/\d+$/)[0],
++      periods,
++      defaultTime: periods.length ? snapTime(Number.isFinite(def) ? def : periods.at(-1).end, periods) : null,
++    });
++  }
++  return layers.sort((a, b) => a.title.localeCompare(b.title));
++}
++
++export async function fetchGibsCatalog(fetchFn = fetch, signal) {
++  const response = await fetchFn(GIBS_CAPABILITIES_URL, { signal, credentials: 'omit', referrerPolicy: 'no-referrer' });
++  if (!response.ok) throw new Error(`GIBS capabilities ${response.status}`);
++  const body = await response.text();
++  if (body.length > MAX_CAPABILITIES_BYTES) throw new Error('GIBS capabilities too large');
++  return parseCapabilities(body);
++}
+diff --git a/src/styles.css b/src/styles.css
+index 45fc1a2..15f8b4c 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -337,3 +337,19 @@ input[type="range"] { width: 100%; height: 16px; margin: 0; cursor: pointer; acc
+   .stargaze-mode .stargaze-info { top: calc(var(--topbar-height) + 10px); right: 56px; width: min(280px, calc(100vw - 68px)); max-height: calc(100dvh - var(--topbar-height) - 20px); }
+   .stargaze-mode #sky-object.sky-object-card { right: 56px; bottom: 12px; left: 10px; width: auto; }
+ }
++
++/* Gaia: NASA GIBS layer browser */
++.explore-controls > .gaia-browser { display: none; }
++.gaia-mode .explore-controls > :not(.gaia-browser) { display: none; }
++.gaia-mode .explore-controls > .gaia-browser { display: block; }
++.gaia-mode #spacetime-source { display: none; }
++.gaia-browser input[type="search"] { width: 100%; height: 34px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; background: #182125; color: var(--text); font-size: 11px; }
++.gaia-list { display: flex; max-height: calc(100dvh - var(--topbar-height) - 190px); flex-direction: column; gap: 2px; margin-top: 8px; overflow-y: auto; scrollbar-width: thin; }
++.gaia-row { display: flex; flex-direction: column; gap: 2px; padding: 7px 8px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
++.gaia-row:hover, .gaia-row[aria-selected="true"] { border-color: rgba(145, 201, 255, .35); background: rgba(145, 201, 255, .08); }
++.gaia-row strong { font-size: 11px; font-weight: 600; }
++.gaia-row small, .gaia-more { overflow: hidden; color: var(--muted, #8fa0a8); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
++.gaia-more { padding: 6px 8px; }
++.gaia-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
++.gaia-chip { padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text); font-size: 10px; cursor: pointer; }
++.gaia-chip[aria-pressed="true"] { border-color: rgba(145, 201, 255, .6); background: rgba(145, 201, 255, .16); }
+diff --git a/b/tests/gibs-catalog.test.js b/tests/gibs-catalog.test.js
+new file mode 100644
+index 0000000..7a18df0
+--- /dev/null
++++ b/tests/gibs-catalog.test.js
+@@ -0,0 +1,41 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { parsePeriods, snapTime, stepTime, formatGibsTime, gaiaTileUrl } from '../src/gibs-catalog.js';
++
++const d = s => Date.parse(`${s}T00:00:00Z`);
++
++test('parses daily, monthly and intraday periods', () => {
++  const [daily] = parsePeriods(['2012-05-08/2013-05-29/P1D']);
++  assert.equal(daily.ms, 86400000);
++  const [monthly] = parsePeriods(['2000-01-01/2020-12-01/P1M']);
++  assert.equal(monthly.months, 1);
++  const [fast] = parsePeriods(['2023-01-01T00:00:00Z/2023-01-02T00:00:00Z/PT10M']);
++  assert.ok(fast.intraday);
++  assert.equal(fast.ms, 600000);
++});
++
++test('steps across ranges and clamps at the ends', () => {
++  const periods = parsePeriods(['2020-01-01/2020-01-03/P1D,2020-02-01/2020-02-02/P1D']);
++  assert.equal(formatGibsTime(stepTime(d('2020-01-03'), periods, 1)), '2020-02-01');
++  assert.equal(formatGibsTime(stepTime(d('2020-02-01'), periods, -1)), '2020-01-03');
++  assert.equal(stepTime(d('2020-01-01'), periods, -1), d('2020-01-01'));
++});
++
++test('monthly stepping and snapping', () => {
++  const periods = parsePeriods(['2020-01-01/2020-12-01/P1M']);
++  assert.equal(formatGibsTime(snapTime(d('2020-05-20'), periods)), '2020-05-01');
++  assert.equal(formatGibsTime(stepTime(d('2020-05-01'), periods, 1)), '2020-06-01');
++});
++
++test('tile URLs include time only for time-bound layers', () => {
++  const base = { id: 'X', format: 'image/png', tileMatrixSet: 'GoogleMapsCompatible_Level6' };
++  assert.match(gaiaTileUrl({ ...base, periods: parsePeriods(['2020-01-01/2020-01-05/P1D']) }, d('2020-01-02')), /X\/default\/2020-01-02\/GoogleMapsCompatible_Level6\/\{z\}\/\{y\}\/\{x\}\.png$/);
++  assert.match(gaiaTileUrl({ ...base, periods: [] }, 0), /X\/default\/GoogleMapsCompatible_Level6\//);
++});
++
++import { matchesCategory } from '../src/gibs-catalog.js';
++test('category chips match by id/title', () => {
++  assert.ok(matchesCategory({ id: 'MODIS_Terra_Cloud_Top_Temp_Day', title: 'Cloud Top' }, 'Clouds'));
++  assert.ok(!matchesCategory({ id: 'BlueMarble', title: 'Blue Marble' }, 'Fires'));
++  assert.ok(matchesCategory({ id: 'x', title: 'y' }, ''));
++});

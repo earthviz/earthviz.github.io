@@ -337,3 +337,19 @@ input[type="range"] { width: 100%; height: 16px; margin: 0; cursor: pointer; acc
   .stargaze-mode .stargaze-info { top: calc(var(--topbar-height) + 10px); right: 56px; width: min(280px, calc(100vw - 68px)); max-height: calc(100dvh - var(--topbar-height) - 20px); }
   .stargaze-mode #sky-object.sky-object-card { right: 56px; bottom: 12px; left: 10px; width: auto; }
 }
+
+/* Gaia: NASA GIBS layer browser */
+.explore-controls > .gaia-browser { display: none; }
+.gaia-mode .explore-controls > :not(.gaia-browser) { display: none; }
+.gaia-mode .explore-controls > .gaia-browser { display: block; }
+.gaia-mode #spacetime-source { display: none; }
+.gaia-browser input[type="search"] { width: 100%; height: 34px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; background: #182125; color: var(--text); font-size: 11px; }
+.gaia-list { display: flex; max-height: calc(100dvh - var(--topbar-height) - 190px); flex-direction: column; gap: 2px; margin-top: 8px; overflow-y: auto; scrollbar-width: thin; }
+.gaia-row { display: flex; flex-direction: column; gap: 2px; padding: 7px 8px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.gaia-row:hover, .gaia-row[aria-selected="true"] { border-color: rgba(145, 201, 255, .35); background: rgba(145, 201, 255, .08); }
+.gaia-row strong { font-size: 11px; font-weight: 600; }
+.gaia-row small, .gaia-more { overflow: hidden; color: var(--muted, #8fa0a8); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.gaia-more { padding: 6px 8px; }
+.gaia-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.gaia-chip { padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text); font-size: 10px; cursor: pointer; }
+.gaia-chip[aria-pressed="true"] { border-color: rgba(145, 201, 255, .6); background: rgba(145, 201, 255, .16); }

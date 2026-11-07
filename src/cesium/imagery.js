@@ -11,6 +11,7 @@ import {
   HLS_NATIVE_MAX_ZOOM,
   HLS_S30_LAYER,
 } from '../spacetime.js';
+import { gaiaTileUrl } from '../gibs-catalog.js';
 
 export const EXPLORE_IMAGERY = {
   esri: {
@@ -117,6 +118,17 @@ export function createSpacetimeLayers(date, source = 'modis-terra') {
   return [modis, landsat, sentinel];
 }
 
+export function createGaiaLayers(layer, time) {
+  // Blue Marble underneath so transparent overlays (clouds, aerosols) read well.
+  const overlay = new ImageryLayer(templateProvider({
+    url: gaiaTileUrl(layer, time),
+    maximumLevel: layer.maxLevel,
+    credit: `NASA EOSDIS GIBS · ${layer.title}`,
+    hasAlphaChannel: layer.format === 'image/png',
+  }), { maximumAnisotropy: 8 });
+  return [...createExploreLayers('nasa-blue-marble'), overlay];
+}
+
 export class ImageryController {
   constructor(globe) {
     this.globe = globe;
@@ -132,6 +144,10 @@ export class ImageryController {
 
   showExplore(source) {
     this.replace(createExploreLayers(source));
+  }
+
+  showGaia(layer, time) {
+    this.replace(layer ? createGaiaLayers(layer, time) : createExploreLayers('nasa-blue-marble'));
   }
 
   showSpacetime(date, source) {
