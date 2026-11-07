@@ -45,6 +45,7 @@ import {
 } from './spacetime.js';
 import { apparentSolarAltitude, horizonDip, solarPhase } from './sky-model.js';
 import { TerrariumTerrainProvider } from './cesium/terrarium-terrain-provider.js';
+import { TERRAIN_SOURCES } from './cesium/terrarium.js';
 import { GIBS_CATEGORIES, fetchGibsCatalog, formatGibsTime, matchesCategory, snapTime, stepTime } from './gibs-catalog.js';
 import { DEFAULT_EXPLORE_IMAGERY, EXPLORE_IMAGERY, ImageryController } from './cesium/imagery.js';
 import { OpenFreeMapOverlayController } from './cesium/openfreemap-overlay.js';
@@ -104,11 +105,13 @@ globeContainer.id = 'earthviz-globe';
 globeContainer.setAttribute('aria-label', 'Interactive 3D globe');
 document.body.prepend(globeContainer);
 
-let terrainProvider = new TerrariumTerrainProvider({
+const makeTerrainProvider = () => new TerrariumTerrainProvider({
+  ...(TERRAIN_SOURCES[$('terrain-source').value] ?? TERRAIN_SOURCES.aws),
   flattenSea: $('flat').checked,
   maximumLevel: +$('terrain-zoom').value,
   gridSize: +$('terrain-mesh').value,
 });
+let terrainProvider = makeTerrainProvider();
 const widget = new CesiumWidget(globeContainer, {
   baseLayer: false,
   terrainProvider,
@@ -348,11 +351,7 @@ function setStargazeCamera() {
 }
 
 function replaceTerrain() {
-  terrainProvider = new TerrariumTerrainProvider({
-    flattenSea: $('flat').checked,
-    maximumLevel: +$('terrain-zoom').value,
-    gridSize: +$('terrain-mesh').value,
-  });
+  terrainProvider = makeTerrainProvider();
   widget.terrainProvider = terrainProvider;
   cityOverlay.setTerrainProvider(terrainProvider);
 }
@@ -362,7 +361,7 @@ function setCredit() {
   const definition = EXPLORE_IMAGERY[key] ?? EXPLORE_IMAGERY[DEFAULT_EXPLORE_IMAGERY];
   const provider = mode === 'spacetime' || mode === 'gaia' ? 'NASA GIBS' : definition.provider;
   const showsOpenFreeMap = $('overlay-buildings').checked || $('overlay-roads').checked;
-  $('credit-label').textContent = `© ${provider} · Mapzen · OSM${showsOpenFreeMap ? ' · OpenFreeMap' : ''} ↗`;
+  $('credit-label').textContent = `© ${provider} · ${$('terrain-source').value === 'mapterhorn' ? 'Mapterhorn' : 'Mapzen'} · OSM${showsOpenFreeMap ? ' · OpenFreeMap' : ''} ↗`;
   const daily = GIBS_DAILY_SOURCES[$('spacetime-source').value] ?? GIBS_DAILY_SOURCES['modis-terra'];
   const imageryCredit = mode === 'gaia'
     ? `NASA EOSDIS GIBS · ${gaiaLayer?.title ?? 'Blue Marble'}`
@@ -378,7 +377,10 @@ function setCredit() {
     link.rel = 'noopener noreferrer';
     return link;
   };
-  credit.replaceChildren(document.createTextNode(`Heights: Mapzen Terrarium (AWS) · ${imageryCredit}`));
+  const [heightsLabel, ...heightsRest] = terrainProvider.creditText.split('© ');
+  if (terrainProvider.creditUrl) {
+    credit.replaceChildren(document.createTextNode(heightsLabel), externalLink(`© ${heightsRest.join('© ')}`, terrainProvider.creditUrl), document.createTextNode(` · ${imageryCredit}`));
+  } else credit.replaceChildren(document.createTextNode(`${terrainProvider.creditText} · ${imageryCredit}`));
   if (showsOpenFreeMap) {
     credit.append(' · Vector detail: ', externalLink('OpenFreeMap', 'https://openfreemap.org/'), ' © OpenMapTiles · Data from © OpenStreetMap contributors');
   }
@@ -994,6 +996,7 @@ $('tile-priority').addEventListener('change', () => {
   updateAdaptiveTilePriority(performance.now(), 0);
 });
 $('terrain-zoom').addEventListener('change', replaceTerrain);
+$('terrain-source').addEventListener('change', () => { replaceTerrain(); setCredit(); });
 $('ex').addEventListener('input', () => { scene.verticalExaggeration = +$('ex').value; });
 $('ex').addEventListener('change', () => cityOverlay.invalidateTerrain());
 $('flat').addEventListener('change', replaceTerrain);

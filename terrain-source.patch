@@ -1,0 +1,374 @@
+diff --git a/index.html b/index.html
+index 52e1130..8bb191d 100644
+--- a/index.html
++++ b/index.html
+@@ -4,7 +4,7 @@
+     <meta charset="utf-8">
+     <meta name="viewport" content="width=device-width, initial-scale=1">
+     <meta name="referrer" content="no-referrer">
+-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com; connect-src 'self' https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com https://tiles.openfreemap.org https://aa.usno.navy.mil https://nominatim.openstreetmap.org https://geocoding-api.open-meteo.com; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; frame-src 'none'; form-action 'self'; upgrade-insecure-requests; block-all-mixed-content">
++    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com https://tiles.mapterhorn.com; connect-src 'self' https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com https://tiles.mapterhorn.com https://tiles.openfreemap.org https://aa.usno.navy.mil https://nominatim.openstreetmap.org https://geocoding-api.open-meteo.com; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; frame-src 'none'; form-action 'self'; upgrade-insecure-requests; block-all-mixed-content">
+     <meta name="theme-color" content="#10191c">
+     <meta name="description" content="Explore Earth for free in an interactive 3D globe with satellite imagery, terrain, historical NASA views, and stargazing. No login or account required.">
+     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+@@ -95,6 +95,8 @@
+       <details class="tool-panel" id="terrain-panel">
+         <summary><span><strong>Terrain</strong><small>Surface quality and relief</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
+         <div class="panel-content">
++          <label for="terrain-source">Elevation source</label>
++          <select id="terrain-source"><option value="aws" selected>Mapzen Terrarium (AWS) · static ~2016</option><option value="mapterhorn">Mapterhorn · maintained</option></select>
+           <div class="field-label"><label for="det">Detail</label><output id="detail-value" for="det">Balanced</output></div>
+           <input id="det" type="range" min="1" max="6" step="1" value="4">
+           <div class="range-labels"><span>Lighter</span><span>Sharper</span></div>
+diff --git a/src/cesium/terrarium-terrain-provider.js b/src/cesium/terrarium-terrain-provider.js
+index 301ed27..b5b5b91 100644
+--- a/src/cesium/terrarium-terrain-provider.js
++++ b/src/cesium/terrarium-terrain-provider.js
+@@ -2,13 +2,12 @@ import { Ellipsoid, Event } from '@cesium/core';
+ import {
+   Credit,
+   HeightmapTerrainData,
++  Request,
+   Resource,
+   TerrainProvider,
+   WebMercatorTilingScheme,
+ } from '@cesium/engine';
+-import { sampleTerrarium, TERRAIN_GRID_SIZE, TERRARIUM_TILE_SIZE } from './terrarium.js';
+-
+-const DEFAULT_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png';
++import { DEFAULT_TERRAIN_SOURCE, planSourceLevels, sampleTerrarium, TERRAIN_GRID_SIZE, TERRAIN_SOURCES } from './terrarium.js';
+ 
+ function tileUrl(template, level, x, y) {
+   return template
+@@ -17,29 +16,36 @@ function tileUrl(template, level, x, y) {
+     .replace('{y}', String(y));
+ }
+ 
++// Tiles may be 256px (AWS) or 512px (Mapterhorn); use the decoded image size.
+ function imagePixels(image) {
++  const size = image.width || 256;
+   const canvas = typeof OffscreenCanvas === 'function'
+-    ? new OffscreenCanvas(TERRARIUM_TILE_SIZE, TERRARIUM_TILE_SIZE)
+-    : Object.assign(document.createElement('canvas'), {
+-      width: TERRARIUM_TILE_SIZE,
+-      height: TERRARIUM_TILE_SIZE,
+-    });
++    ? new OffscreenCanvas(size, size)
++    : Object.assign(document.createElement('canvas'), { width: size, height: size });
+   const context = canvas.getContext('2d', { willReadFrequently: true });
+-  context.clearRect(0, 0, TERRARIUM_TILE_SIZE, TERRARIUM_TILE_SIZE);
+-  context.drawImage(image, 0, 0, TERRARIUM_TILE_SIZE, TERRARIUM_TILE_SIZE);
+-  return context.getImageData(0, 0, TERRARIUM_TILE_SIZE, TERRARIUM_TILE_SIZE).data;
++  context.clearRect(0, 0, size, size);
++  context.drawImage(image, 0, 0, size, size);
++  return { pixels: context.getImageData(0, 0, size, size).data, size };
+ }
+ 
+ export class TerrariumTerrainProvider {
+   constructor(options = {}) {
+-    this.url = options.url ?? DEFAULT_URL;
++    const source = TERRAIN_SOURCES[DEFAULT_TERRAIN_SOURCE];
++    this.url = options.url ?? source.url;
+     this.maximumLevel = options.maximumLevel ?? 15;
++    // Deepest zoom the server actually has; deeper levels are oversampled.
++    this.nativeMaximumLevel = options.nativeMaximumLevel ?? source.nativeMaximumLevel;
++    this.guaranteedLevel = options.guaranteedLevel ?? source.guaranteedLevel;
++    // Source tiles that returned 404, so descendants skip straight to a parent.
++    this.missing = new Set();
++    this.creditText = options.credit ?? source.credit;
++    this.creditUrl = options.creditUrl;
+     this.flattenSea = options.flattenSea ?? true;
+     // Samples per tile edge. Higher values preserve more steep, narrow relief.
+     this.gridSize = options.gridSize ?? TERRAIN_GRID_SIZE;
+     this.tilingScheme = new WebMercatorTilingScheme({ ellipsoid: Ellipsoid.WGS84 });
+     this.errorEvent = new Event();
+-    this.credit = new Credit('Elevation: Mapzen Terrarium (AWS)');
++    this.credit = new Credit(this.creditText);
+     // We classify ocean tiles for LOD, but deliberately do not expose a water
+     // mask: Cesium otherwise replaces source pixels with its animated water
+     // material instead of simply draping the selected imagery.
+@@ -56,10 +62,23 @@ export class TerrariumTerrainProvider {
+ 
+   requestTileGeometry(x, y, level, request) {
+     if (level > this.maximumLevel) return undefined;
++    const levels = planSourceLevels(level, x, y, this, (l, tx, ty) => this.missing.has(`${l}/${tx}/${ty}`));
++    return this.fetchLevel(levels, 0, x, y, level, request);
++  }
++
++  fetchLevel(levels, index, x, y, level, request) {
++    const nativeLevel = levels[index];
++    const scale = 2 ** (level - nativeLevel);
++    const tx = Math.floor(x / scale);
++    const ty = Math.floor(y / scale);
++    const region = scale > 1
++      ? { x: (x % scale) / scale, y: (y % scale) / scale, size: 1 / scale }
++      : undefined;
++    const isLast = index === levels.length - 1;
+     const resource = new Resource({
+-      url: tileUrl(this.url, level, x, y),
++      url: tileUrl(this.url, nativeLevel, tx, ty),
+       request,
+-      retryAttempts: 1,
++      retryAttempts: isLast ? 1 : 0,
+       retryCallback: () => true,
+     });
+     const imagePromise = resource.fetchImage({
+@@ -69,12 +88,12 @@ export class TerrariumTerrainProvider {
+     });
+     if (!imagePromise) return undefined;
+     return imagePromise.then((image) => {
+-      const sampled = sampleTerrarium(
+-        imagePixels(image),
+-        TERRARIUM_TILE_SIZE,
+-        TERRARIUM_TILE_SIZE,
+-        { flattenSea: this.flattenSea, gridSize: this.gridSize },
+-      );
++      const { pixels, size } = imagePixels(image);
++      const sampled = sampleTerrarium(pixels, size, size, {
++        flattenSea: this.flattenSea,
++        gridSize: this.gridSize,
++        region,
++      });
+       image.close?.();
+       const childTileMask = level >= this.maximumLevel || (level >= 5 && sampled.allWater) ? 0 : 15;
+       return new HeightmapTerrainData({
+@@ -83,6 +102,14 @@ export class TerrariumTerrainProvider {
+         height: this.gridSize,
+         childTileMask,
+       });
++    }, (error) => {
++      if (isLast) throw error;
++      // Regional tiles are missing elsewhere: remember it and use the parent.
++      if (error?.statusCode === 404) {
++        if (this.missing.size > 20000) this.missing.clear();
++        this.missing.add(`${nativeLevel}/${tx}/${ty}`);
++      }
++      return this.fetchLevel(levels, index + 1, x, y, level, new Request({ throttle: false }));
+     });
+   }
+ 
+diff --git a/src/cesium/terrarium.js b/src/cesium/terrarium.js
+index d373079..6cec6a8 100644
+--- a/src/cesium/terrarium.js
++++ b/src/cesium/terrarium.js
+@@ -1,4 +1,28 @@
+ export const TERRARIUM_TILE_SIZE = 256;
++
++// Terrarium-encoded elevation tile sources. `nativeMaximumLevel` is the deepest
++// zoom requested from the server; deeper levels are oversampled from an ancestor
++// tile. `guaranteedLevel` is the deepest zoom that exists everywhere: tiles
++// between it and `nativeMaximumLevel` may 404 and fall back to a parent.
++export const TERRAIN_SOURCES = {
++  aws: {
++    label: 'Mapzen Terrarium (AWS) · static ~2016',
++    url: 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png',
++    nativeMaximumLevel: 15,
++    guaranteedLevel: 15,
++    credit: 'Heights: Mapzen Terrarium (AWS)',
++  },
++  mapterhorn: {
++    label: 'Mapterhorn · maintained',
++    url: 'https://tiles.mapterhorn.com/{z}/{x}/{y}.webp',
++    // Global z0-z12 (Copernicus GLO-30); regional z13-z17 only where published.
++    nativeMaximumLevel: 17,
++    guaranteedLevel: 12,
++    credit: 'Heights: © Mapterhorn',
++    creditUrl: 'https://mapterhorn.com/attribution',
++  },
++};
++export const DEFAULT_TERRAIN_SOURCE = 'aws';
+ export const TERRAIN_GRID_SIZE = 33;
+ 
+ export function decodeTerrariumHeight(red, green, blue) {
+@@ -15,33 +39,42 @@ export function sampleTerrarium(pixels, width, height, options = {}) {
+   const flattenSea = options.flattenSea ?? true;
+   const heights = new Float32Array(gridSize * gridSize);
+   const waterMask = new Uint8Array(gridSize * gridSize);
++  // Optional sub-window of the tile, as fractions in [0, 1], for oversampling.
++  const region = options.region ?? { x: 0, y: 0, size: 1 };
+   let minimumHeight = Infinity;
+   let maximumHeight = -Infinity;
+   let allWater = true;
+ 
+   // Classification uses every source pixel so islands do not disappear merely
+   // because the rendered height grid is intentionally sparse.
+-  for (let i = 0; i < pixels.length; i += 4) {
+-    if (decodeTerrariumHeight(pixels[i], pixels[i + 1], pixels[i + 2]) >= 0) {
+-      allWater = false;
+-      break;
++  const x0 = Math.floor(region.x * width);
++  const x1 = Math.min(width, Math.ceil((region.x + region.size) * width));
++  const y0 = Math.floor(region.y * height);
++  const y1 = Math.min(height, Math.ceil((region.y + region.size) * height));
++  for (let y = y0; y < y1 && allWater; y += 1) {
++    for (let x = x0; x < x1; x += 1) {
++      const i = 4 * (y * width + x);
++      if (decodeTerrariumHeight(pixels[i], pixels[i + 1], pixels[i + 2]) >= 0) {
++        allWater = false;
++        break;
++      }
+     }
+   }
+ 
+   for (let row = 0; row < gridSize; row += 1) {
+-    const py = row / (gridSize - 1) * (height - 1);
+-    const y0 = Math.floor(py);
+-    const y1 = Math.min(height - 1, y0 + 1);
+-    const fy = py - y0;
++    const py = (region.y + row / (gridSize - 1) * region.size) * (height - 1);
++    const iy0 = Math.floor(py);
++    const iy1 = Math.min(height - 1, iy0 + 1);
++    const fy = py - iy0;
+     for (let column = 0; column < gridSize; column += 1) {
+-      const px = column / (gridSize - 1) * (width - 1);
+-      const x0 = Math.floor(px);
+-      const x1 = Math.min(width - 1, x0 + 1);
+-      const fx = px - x0;
+-      const north = heightAt(pixels, width, x0, y0) * (1 - fx)
+-        + heightAt(pixels, width, x1, y0) * fx;
+-      const south = heightAt(pixels, width, x0, y1) * (1 - fx)
+-        + heightAt(pixels, width, x1, y1) * fx;
++      const px = (region.x + column / (gridSize - 1) * region.size) * (width - 1);
++      const ix0 = Math.floor(px);
++      const ix1 = Math.min(width - 1, ix0 + 1);
++      const fx = px - ix0;
++      const north = heightAt(pixels, width, ix0, iy0) * (1 - fx)
++        + heightAt(pixels, width, ix1, iy0) * fx;
++      const south = heightAt(pixels, width, ix0, iy1) * (1 - fx)
++        + heightAt(pixels, width, ix1, iy1) * fx;
+       const sampled = north * (1 - fy) + south * fy;
+       const index = row * gridSize + column;
+       waterMask[index] = sampled < 0 ? 255 : 0;
+@@ -53,3 +86,17 @@ export function sampleTerrarium(pixels, width, height, options = {}) {
+ 
+   return { heights, waterMask, allWater, minimumHeight, maximumHeight };
+ }
++
++// Source zoom levels to try, deepest first, for a tile at `level`. Tiles whose
++// ancestor is already known to be missing are skipped without a request.
++export function planSourceLevels(level, x, y, { nativeMaximumLevel, guaranteedLevel }, isMissing = () => false) {
++  let start = Math.min(level, nativeMaximumLevel);
++  for (let l = guaranteedLevel + 1; l <= start; l += 1) {
++    const shift = level - l;
++    if (isMissing(l, Math.floor(x / 2 ** shift), Math.floor(y / 2 ** shift))) { start = l - 1; break; }
++  }
++  start = Math.max(start, Math.min(level, guaranteedLevel));
++  const levels = [];
++  for (let l = start; l >= Math.min(level, guaranteedLevel); l -= 1) levels.push(l);
++  return levels;
++}
+diff --git a/src/cesium-main.js b/src/cesium-main.js
+index 260d208..479de30 100644
+--- a/src/cesium-main.js
++++ b/src/cesium-main.js
+@@ -45,6 +45,7 @@ import {
+ } from './spacetime.js';
+ import { apparentSolarAltitude, horizonDip, solarPhase } from './sky-model.js';
+ import { TerrariumTerrainProvider } from './cesium/terrarium-terrain-provider.js';
++import { TERRAIN_SOURCES } from './cesium/terrarium.js';
+ import { GIBS_CATEGORIES, fetchGibsCatalog, formatGibsTime, matchesCategory, snapTime, stepTime } from './gibs-catalog.js';
+ import { DEFAULT_EXPLORE_IMAGERY, EXPLORE_IMAGERY, ImageryController } from './cesium/imagery.js';
+ import { OpenFreeMapOverlayController } from './cesium/openfreemap-overlay.js';
+@@ -104,11 +105,13 @@ globeContainer.id = 'earthviz-globe';
+ globeContainer.setAttribute('aria-label', 'Interactive 3D globe');
+ document.body.prepend(globeContainer);
+ 
+-let terrainProvider = new TerrariumTerrainProvider({
++const makeTerrainProvider = () => new TerrariumTerrainProvider({
++  ...(TERRAIN_SOURCES[$('terrain-source').value] ?? TERRAIN_SOURCES.aws),
+   flattenSea: $('flat').checked,
+   maximumLevel: +$('terrain-zoom').value,
+   gridSize: +$('terrain-mesh').value,
+ });
++let terrainProvider = makeTerrainProvider();
+ const widget = new CesiumWidget(globeContainer, {
+   baseLayer: false,
+   terrainProvider,
+@@ -348,11 +351,7 @@ function setStargazeCamera() {
+ }
+ 
+ function replaceTerrain() {
+-  terrainProvider = new TerrariumTerrainProvider({
+-    flattenSea: $('flat').checked,
+-    maximumLevel: +$('terrain-zoom').value,
+-    gridSize: +$('terrain-mesh').value,
+-  });
++  terrainProvider = makeTerrainProvider();
+   widget.terrainProvider = terrainProvider;
+   cityOverlay.setTerrainProvider(terrainProvider);
+ }
+@@ -362,7 +361,7 @@ function setCredit() {
+   const definition = EXPLORE_IMAGERY[key] ?? EXPLORE_IMAGERY[DEFAULT_EXPLORE_IMAGERY];
+   const provider = mode === 'spacetime' || mode === 'gaia' ? 'NASA GIBS' : definition.provider;
+   const showsOpenFreeMap = $('overlay-buildings').checked || $('overlay-roads').checked;
+-  $('credit-label').textContent = `© ${provider} · Mapzen · OSM${showsOpenFreeMap ? ' · OpenFreeMap' : ''} ↗`;
++  $('credit-label').textContent = `© ${provider} · ${$('terrain-source').value === 'mapterhorn' ? 'Mapterhorn' : 'Mapzen'} · OSM${showsOpenFreeMap ? ' · OpenFreeMap' : ''} ↗`;
+   const daily = GIBS_DAILY_SOURCES[$('spacetime-source').value] ?? GIBS_DAILY_SOURCES['modis-terra'];
+   const imageryCredit = mode === 'gaia'
+     ? `NASA EOSDIS GIBS · ${gaiaLayer?.title ?? 'Blue Marble'}`
+@@ -378,7 +377,10 @@ function setCredit() {
+     link.rel = 'noopener noreferrer';
+     return link;
+   };
+-  credit.replaceChildren(document.createTextNode(`Heights: Mapzen Terrarium (AWS) · ${imageryCredit}`));
++  const [heightsLabel, ...heightsRest] = terrainProvider.creditText.split('© ');
++  if (terrainProvider.creditUrl) {
++    credit.replaceChildren(document.createTextNode(heightsLabel), externalLink(`© ${heightsRest.join('© ')}`, terrainProvider.creditUrl), document.createTextNode(` · ${imageryCredit}`));
++  } else credit.replaceChildren(document.createTextNode(`${terrainProvider.creditText} · ${imageryCredit}`));
+   if (showsOpenFreeMap) {
+     credit.append(' · Vector detail: ', externalLink('OpenFreeMap', 'https://openfreemap.org/'), ' © OpenMapTiles · Data from © OpenStreetMap contributors');
+   }
+@@ -994,6 +996,7 @@ $('tile-priority').addEventListener('change', () => {
+   updateAdaptiveTilePriority(performance.now(), 0);
+ });
+ $('terrain-zoom').addEventListener('change', replaceTerrain);
++$('terrain-source').addEventListener('change', () => { replaceTerrain(); setCredit(); });
+ $('ex').addEventListener('input', () => { scene.verticalExaggeration = +$('ex').value; });
+ $('ex').addEventListener('change', () => cityOverlay.invalidateTerrain());
+ $('flat').addEventListener('change', replaceTerrain);
+diff --git a/tests/terrarium.test.js b/tests/terrarium.test.js
+index 537d05b..d0de584 100644
+--- a/tests/terrarium.test.js
++++ b/tests/terrarium.test.js
+@@ -32,3 +32,26 @@ test('classification scans source pixels beyond the rendered grid', () => {
+   pixels[4 * 4 + 1] = 1;
+   assert.equal(sampleTerrarium(pixels, 3, 3, { gridSize: 2 }).allWater, false);
+ });
++
++test('region sampling reads a sub-window of the tile', () => {
++  // 4x4 tile whose heights equal the column index (red=128 => 0 m, green=column).
++  const size = 4;
++  const pixels = new Uint8ClampedArray(size * size * 4);
++  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) pixels.set([128, x * 10, 0, 255], 4 * (y * size + x));
++  const full = sampleTerrarium(pixels, size, size, { gridSize: 2 });
++  assert.deepEqual([...full.heights], [0, 30, 0, 30]);
++  const right = sampleTerrarium(pixels, size, size, { gridSize: 2, region: { x: 0.5, y: 0, size: 0.5 } });
++  assert.deepEqual([...right.heights], [15, 30, 15, 30]);
++});
++
++import { planSourceLevels, TERRAIN_SOURCES } from '../src/cesium/terrarium.js';
++test('plans source levels with parent fallback and missing-tile memory', () => {
++  const mh = TERRAIN_SOURCES.mapterhorn;
++  assert.deepEqual(planSourceLevels(10, 5, 5, mh), [10]);
++  assert.deepEqual(planSourceLevels(14, 0, 0, mh), [14, 13, 12]);
++  assert.deepEqual(planSourceLevels(20, 0, 0, mh), [17, 16, 15, 14, 13, 12]);
++  // z13 ancestor of this z15 tile is known missing: go straight to z12.
++  const missing = (l, x, y) => l === 13 && x === 2 && y === 2;
++  assert.deepEqual(planSourceLevels(15, 9, 10, mh, missing), [12]);
++  assert.deepEqual(planSourceLevels(15, 9, 10, TERRAIN_SOURCES.aws), [15]);
++});
+diff --git a/vite.config.js b/vite.config.js
+index c1b936f..dd33407 100644
+--- a/vite.config.js
++++ b/vite.config.js
+@@ -10,8 +10,8 @@ const contentSecurityPolicy = [
+   "object-src 'none'",
+   "script-src 'self'",
+   "style-src 'self' 'unsafe-inline'",
+-  "img-src 'self' data: blob: https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com",
+-  "connect-src 'self' https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com https://tiles.openfreemap.org https://aa.usno.navy.mil https://nominatim.openstreetmap.org https://geocoding-api.open-meteo.com",
++  "img-src 'self' data: blob: https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com https://tiles.mapterhorn.com",
++  "connect-src 'self' https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com https://tiles.mapterhorn.com https://tiles.openfreemap.org https://aa.usno.navy.mil https://nominatim.openstreetmap.org https://geocoding-api.open-meteo.com",
+   "font-src 'self' data:",
+   "worker-src 'self' blob:",
+   "manifest-src 'self'",

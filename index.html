@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="referrer" content="no-referrer">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com; connect-src 'self' https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com https://tiles.openfreemap.org https://aa.usno.navy.mil https://nominatim.openstreetmap.org https://geocoding-api.open-meteo.com; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; frame-src 'none'; form-action 'self'; upgrade-insecure-requests; block-all-mixed-content">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com https://tiles.mapterhorn.com; connect-src 'self' https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com https://tiles.mapterhorn.com https://tiles.openfreemap.org https://aa.usno.navy.mil https://nominatim.openstreetmap.org https://geocoding-api.open-meteo.com; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; frame-src 'none'; form-action 'self'; upgrade-insecure-requests; block-all-mixed-content">
     <meta name="theme-color" content="#10191c">
     <meta name="description" content="Explore Earth for free in an interactive 3D globe with satellite imagery, terrain, historical NASA views, and stargazing. No login or account required.">
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
@@ -95,6 +95,8 @@
       <details class="tool-panel" id="terrain-panel">
         <summary><span><strong>Terrain</strong><small>Surface quality and relief</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
         <div class="panel-content">
+          <label for="terrain-source">Elevation source</label>
+          <select id="terrain-source"><option value="aws" selected>Mapzen Terrarium (AWS) · static ~2016</option><option value="mapterhorn">Mapterhorn · maintained</option></select>
           <div class="field-label"><label for="det">Detail</label><output id="detail-value" for="det">Balanced</output></div>
           <input id="det" type="range" min="1" max="6" step="1" value="4">
           <div class="range-labels"><span>Lighter</span><span>Sharper</span></div>
