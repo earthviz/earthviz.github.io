@@ -58,6 +58,22 @@
     </header>
 
     <aside class="explore-controls" aria-label="Explore controls">
+      <details class="tool-panel flight-panel" id="flight-panel">
+        <summary><span><strong>Flight</strong><small id="flight-sub">Bird’s-eye camera</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
+        <div class="panel-content">
+          <button id="flight-start" class="flight-start" type="button" aria-pressed="false">Take flight <kbd>F</kbd></button>
+          <div class="field-label"><label for="flight-speed">Speed</label><output id="flight-speed-value" for="flight-speed">360 km/h</output></div>
+          <input id="flight-speed" type="range" min="0" max="1000" step="1" value="404" aria-describedby="flight-keys">
+          <div class="range-labels"><span>Glide</span><span>Supersonic</span></div>
+          <div class="field-label"><label for="flight-agl">Height above ground</label><output id="flight-agl-value" for="flight-agl">900 m</output></div>
+          <input id="flight-agl" type="range" min="0" max="1000" step="1" value="551">
+          <div class="range-labels"><span>Skim</span><span>High</span></div>
+          <div class="field-label"><label for="flight-fov">Field of view</label><output id="flight-fov-value" for="flight-fov">70°</output></div>
+          <input id="flight-fov" type="range" min="35" max="110" step="1" value="70">
+          <label class="switch-row" for="flight-follow">Follow terrain<input id="flight-follow" type="checkbox" role="switch" checked></label>
+          <p id="flight-keys" class="panel-note"><kbd>W</kbd>/<kbd>S</kbd> speed · <kbd>A</kbd>/<kbd>D</kbd> turn · <kbd>Q</kbd>/<kbd>E</kbd> height · <kbd>↑</kbd>/<kbd>↓</kbd> pitch · drag to look · wheel for speed · <kbd>Shift</kbd> boost · <kbd>Space</kbd> pause · <kbd>Esc</kbd> land. With terrain following off you fly where you look.</p>
+        </div>
+      </details>
       <details class="tool-panel gaia-browser" id="gaia-browser" open>
         <summary><span><strong>Gaia</strong><small id="gaia-count">NASA GIBS layers</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
         <div class="panel-content">
@@ -174,8 +190,19 @@
       <button id="north" class="compass" type="button" aria-label="Face north" title="Face north"><span>N</span><span id="compass-needle" aria-hidden="true">▲</span></button>
       <div class="nav-stack"><button id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">+</button><button id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button></div>
       <button id="home" type="button" aria-label="Return to globe view" title="Return to globe view">◎</button>
+      <button id="fly-toggle" class="fly-toggle" type="button" aria-pressed="false" title="Fly (F)">Fly</button>
       <button id="ui-toggle" class="ui-toggle" type="button" aria-pressed="false" title="Focus on the world">Focus</button>
     </nav>
+
+    <div id="flight-hud" class="flight-hud" aria-hidden="true" hidden>
+      <div class="flight-readouts">
+        <div><small>Speed</small><strong id="fh-speed">0</strong><em>km/h</em></div>
+        <div><small>Height</small><strong id="fh-agl">0</strong><em id="fh-agl-unit">m AGL</em></div>
+        <div><small>Heading</small><strong id="fh-heading">000°</strong><em id="fh-compass">N</em></div>
+        <div><small>Pitch</small><strong id="fh-pitch">0°</strong><em id="fh-state">cruise</em></div>
+      </div>
+      <p id="flight-hint" class="flight-hint"><kbd>W</kbd><kbd>S</kbd> speed · <kbd>A</kbd><kbd>D</kbd> turn · <kbd>Q</kbd><kbd>E</kbd> height · drag to look · <kbd>Space</kbd> pause · <kbd>Esc</kbd> land</p>
+    </div>
 
     <footer class="footer">
       <nav class="footer-links" aria-label="Project information"><a href="/docs/">How To Use</a><a href="https://github.com/earthviz/earthviz.github.io" target="_blank" rel="noopener">Source on GitHub</a><a href="/disclaimer/">Disclaimer</a></nav>

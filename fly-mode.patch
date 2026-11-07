@@ -1,0 +1,905 @@
+diff --git a/README.md b/README.md
+index 6ecb33a..3ddfeea 100644
+--- a/README.md
++++ b/README.md
+@@ -25,12 +25,18 @@ The app ships a restrictive Content Security Policy that permits requests only t
+ - **Spacetime**: daily NASA GIBS Terra, Aqua, Suomi NPP, or NOAA-20 imagery, one explicitly loaded date at a time.
+ - **Stargaze**: look at the local night sky from the selected latitude and longitude.
+ 
++Flight is not a mode: it overlays Explore, Spacetime, and Gaia (see below).
++
+ ### Controls
+ 
+ The full-width search opens suggested destinations on focus and offers city suggestions as you type. Press **Explore** for a broader place/landmark search, or enter `latitude, longitude`. Use **↑ / ↓** and **Enter** to choose a suggestion, **Escape** to dismiss it, and **Ctrl/Cmd + K** to focus search.
+ 
+ Left-drag pans, right-drag orbits around the picked surface, middle-drag or Shift-drag free-looks, and the wheel zooms. WASD moves the camera, Q/E moves vertically, arrow keys look, and Shift accelerates held keys. The lower-right buttons zoom, face north, or return to the initial view.
+ 
++### Flight
++
++Press **F** (or **Fly**, lower right) for a first-person bird's-eye camera over any imagery in Explore, Spacetime, or Gaia. **W/S** or the wheel set speed (10 m/s to 3,000 m/s, log scale), **A/D** turn with a cosmetic bank, **Q/E** change height, drag or **↑/↓** looks and pitches, **Shift** boosts, **Space** pauses, and **Esc** lands. With **Follow terrain** on (default) the camera holds a chosen height above ground and samples terrain ahead so it climbs before ridges; with it off the flight path follows the camera pitch. The flight model is pure maths in `src/flight.js` (tested in `tests/flight.test.js`); `cesium-main.js` samples `globe.getHeight`, reads input, and drives the camera. 3D buildings and roads load around the point ahead of the camera.
++
+ Map and terrain settings are at the upper left; lighting controls at the upper right. Location and loading status appear at the lower left. On narrow screens only one settings panel opens at a time. Credits and tips are in the footer.
+ 
+ ## 3D buildings and roads
+diff --git a/docs/index.html b/docs/index.html
+index be7a14f..211de85 100644
+--- a/docs/index.html
++++ b/docs/index.html
+@@ -25,6 +25,7 @@
+         <a href="#search">Find a place</a>
+         <a href="#modes">Viewing modes</a>
+         <a href="#controls">Map controls</a>
++        <a href="#flight">Flight</a>
+         <a href="#keyboard">Keyboard</a>
+         <a href="#troubleshooting">Troubleshooting</a>
+       </aside>
+@@ -96,6 +97,19 @@
+           <p>Higher detail, finer terrain meshes, buildings, and roads can all increase loading time and graphics usage. If interaction becomes slow, reduce terrain detail or disable optional human elements.</p>
+         </section>
+ 
++        <section id="flight">
++          <h2>Fly over the terrain</h2>
++          <p>Press <kbd>F</kbd>, select <strong>Fly</strong> in the lower-right controls, or use the <strong>Flight</strong> panel to see the landscape from a first-person bird’s-eye view. From orbit the camera glides down to the centre of your view; from low altitude it takes off where it is. Flight works over any imagery in Explore, Spacetime, and Gaia.</p>
++          <ul>
++            <li><strong>Speed:</strong> <kbd>W</kbd> faster, <kbd>S</kbd> slower, the mouse wheel, or the Speed slider. Hold <kbd>Shift</kbd> to boost and <kbd>Space</kbd> to pause.</li>
++            <li><strong>Heading:</strong> <kbd>A</kbd> and <kbd>D</kbd> (or <kbd>←</kbd> and <kbd>→</kbd>) turn, and the camera banks into the turn.</li>
++            <li><strong>Direction:</strong> drag to look around, or use <kbd>↑</kbd> and <kbd>↓</kbd> to pitch.</li>
++            <li><strong>Height:</strong> <kbd>Q</kbd> and <kbd>E</kbd> descend and climb. With <strong>Follow terrain</strong> on, the camera holds the chosen height above ground and climbs ahead of ridges. With it off, you fly where you look.</li>
++            <li><strong>Field of view:</strong> <kbd>+</kbd> and <kbd>−</kbd>, the zoom buttons, or the slider.</li>
++            <li><strong>Land:</strong> <kbd>Esc</kbd> or <kbd>F</kbd>. Searching for a place while flying takes you there.</li>
++          </ul>
++        </section>
++
+         <section id="keyboard">
+           <h2>Keyboard controls</h2>
+           <ul>
+@@ -104,7 +118,8 @@
+             <li>Arrow keys change the viewing direction.</li>
+             <li><kbd>+</kbd> and <kbd>−</kbd> zoom.</li>
+             <li>Hold <kbd>Shift</kbd> for faster keyboard movement.</li>
+-            <li><kbd>Esc</kbd> closes search suggestions and open panels.</li>
++            <li><kbd>F</kbd> starts and stops flight; see <a href="#flight">Fly over the terrain</a> for its controls.</li>
++            <li><kbd>Esc</kbd> closes search suggestions and open panels, and lands when flying.</li>
+           </ul>
+         </section>
+ 
+diff --git a/index.html b/index.html
+index 8bb191d..d4d2839 100644
+--- a/index.html
++++ b/index.html
+@@ -58,6 +58,22 @@
+     </header>
+ 
+     <aside class="explore-controls" aria-label="Explore controls">
++      <details class="tool-panel flight-panel" id="flight-panel">
++        <summary><span><strong>Flight</strong><small id="flight-sub">Bird’s-eye camera</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
++        <div class="panel-content">
++          <button id="flight-start" class="flight-start" type="button" aria-pressed="false">Take flight <kbd>F</kbd></button>
++          <div class="field-label"><label for="flight-speed">Speed</label><output id="flight-speed-value" for="flight-speed">360 km/h</output></div>
++          <input id="flight-speed" type="range" min="0" max="1000" step="1" value="404" aria-describedby="flight-keys">
++          <div class="range-labels"><span>Glide</span><span>Supersonic</span></div>
++          <div class="field-label"><label for="flight-agl">Height above ground</label><output id="flight-agl-value" for="flight-agl">900 m</output></div>
++          <input id="flight-agl" type="range" min="0" max="1000" step="1" value="551">
++          <div class="range-labels"><span>Skim</span><span>High</span></div>
++          <div class="field-label"><label for="flight-fov">Field of view</label><output id="flight-fov-value" for="flight-fov">70°</output></div>
++          <input id="flight-fov" type="range" min="35" max="110" step="1" value="70">
++          <label class="switch-row" for="flight-follow">Follow terrain<input id="flight-follow" type="checkbox" role="switch" checked></label>
++          <p id="flight-keys" class="panel-note"><kbd>W</kbd>/<kbd>S</kbd> speed · <kbd>A</kbd>/<kbd>D</kbd> turn · <kbd>Q</kbd>/<kbd>E</kbd> height · <kbd>↑</kbd>/<kbd>↓</kbd> pitch · drag to look · wheel for speed · <kbd>Shift</kbd> boost · <kbd>Space</kbd> pause · <kbd>Esc</kbd> land. With terrain following off you fly where you look.</p>
++        </div>
++      </details>
+       <details class="tool-panel gaia-browser" id="gaia-browser" open>
+         <summary><span><strong>Gaia</strong><small id="gaia-count">NASA GIBS layers</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
+         <div class="panel-content">
+@@ -174,9 +190,20 @@
+       <button id="north" class="compass" type="button" aria-label="Face north" title="Face north"><span>N</span><span id="compass-needle" aria-hidden="true">▲</span></button>
+       <div class="nav-stack"><button id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in (+)">+</button><button id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out (−)">−</button></div>
+       <button id="home" type="button" aria-label="Return to globe view" title="Return to globe view">◎</button>
++      <button id="fly-toggle" class="fly-toggle" type="button" aria-pressed="false" title="Fly (F)">Fly</button>
+       <button id="ui-toggle" class="ui-toggle" type="button" aria-pressed="false" title="Focus on the world">Focus</button>
+     </nav>
+ 
++    <div id="flight-hud" class="flight-hud" aria-hidden="true" hidden>
++      <div class="flight-readouts">
++        <div><small>Speed</small><strong id="fh-speed">0</strong><em>km/h</em></div>
++        <div><small>Height</small><strong id="fh-agl">0</strong><em id="fh-agl-unit">m AGL</em></div>
++        <div><small>Heading</small><strong id="fh-heading">000°</strong><em id="fh-compass">N</em></div>
++        <div><small>Pitch</small><strong id="fh-pitch">0°</strong><em id="fh-state">cruise</em></div>
++      </div>
++      <p id="flight-hint" class="flight-hint"><kbd>W</kbd><kbd>S</kbd> speed · <kbd>A</kbd><kbd>D</kbd> turn · <kbd>Q</kbd><kbd>E</kbd> height · drag to look · <kbd>Space</kbd> pause · <kbd>Esc</kbd> land</p>
++    </div>
++
+     <footer class="footer">
+       <nav class="footer-links" aria-label="Project information"><a href="/docs/">How To Use</a><a href="https://github.com/earthviz/earthviz.github.io" target="_blank" rel="noopener">Source on GitHub</a><a href="/disclaimer/">Disclaimer</a></nav>
+       <details class="about"><summary>About Earthviz ↗</summary><div><h1>Explore Earth in 3D for free</h1><p>Earthviz is a free interactive 3D globe for exploring satellite imagery, detailed terrain, places, roads, and buildings around the world. There is no login, account, download, or installation required.</p><p>Browse historical NASA Earth observations in Spacetime mode, follow sunlight across the planet, or stargaze from any location and date. The project’s source code is available on <a href="https://github.com/earthviz/earthviz.github.io" target="_blank" rel="noopener">GitHub</a>.</p></div></details>
+diff --git a/src/cesium-main.js b/src/cesium-main.js
+index 479de30..9b7e1c6 100644
+--- a/src/cesium-main.js
++++ b/src/cesium-main.js
+@@ -44,6 +44,21 @@ import {
+   previousUtcDate,
+ } from './spacetime.js';
+ import { apparentSolarAltitude, horizonDip, solarPhase } from './sky-model.js';
++import {
++  FLIGHT_DEFAULTS,
++  FLIGHT_LIMITS,
++  aboveGround,
++  advance,
++  compassLabel,
++  createFlight,
++  formatDistance,
++  fromLogPosition,
++  lookAheadPoints,
++  metersPerSecondToKmh,
++  stepFlight,
++  teleportFlight,
++  toLogPosition,
++} from './flight.js';
+ import { TerrariumTerrainProvider } from './cesium/terrarium-terrain-provider.js';
+ import { TERRAIN_SOURCES } from './cesium/terrarium.js';
+ import { GIBS_CATEGORIES, fetchGibsCatalog, formatGibsTime, matchesCategory, snapTime, stepTime } from './gibs-catalog.js';
+@@ -89,6 +104,17 @@ let skyAzimuth = 0;
+ let skyAltitude = 25 * D2R;
+ let skyFov = 60 * D2R;
+ let stargazeDrag = null;
++// Flight: 'off' | 'entering' (camera gliding down to the start pose) | 'flying'.
++const flight = createFlight();
++let flightPhase = 'off';
++let flightFov = FLIGHT_DEFAULTS.fov;
++let savedFov = null;
++let flightDrag = null;
++let flightFrame = 0;
++let aheadGround = [];
++const flightLook = { x: 0, y: 0 };
++const flightCartographic = new Cartographic();
++const flightPosition = new Cartesian3();
+ let starCatalog = [];
+ let starEquatorial = [];
+ let starPoints = null;
+@@ -210,15 +236,35 @@ function isTypingTarget(target) {
+     && (target.matches('input, textarea, select, button') || target.closest('[contenteditable="true"]'));
+ }
+ 
++// While flying, sliders and switches in the Flight panel must not swallow flight keys.
++function isTextEntryTarget(target) {
++  return target instanceof Element
++    && (target.matches('input:not([type="range"]):not([type="checkbox"]), textarea, select') || target.closest('[contenteditable="true"]'));
++}
++
+ document.addEventListener('keydown', event => {
+-  if (!cameraKeyCodes.has(event.code) || event.ctrlKey || event.metaKey || isTypingTarget(event.target)) return;
++  const blocked = flightPhase === 'off' ? isTypingTarget(event.target) : isTextEntryTarget(event.target);
++  if (!cameraKeyCodes.has(event.code) || event.ctrlKey || event.metaKey || blocked) return;
+   pressedCameraKeys.add(event.code);
+   event.preventDefault();
+ });
++document.addEventListener('keydown', event => {
++  if (event.ctrlKey || event.metaKey || event.altKey || event.repeat || isTextEntryTarget(event.target)) return;
++  if (event.code === 'KeyF' && mode !== 'stargaze') {
++    event.preventDefault();
++    document.activeElement?.blur?.();
++    toggleFlight();
++  } else if (event.code === 'Space' && flightPhase === 'flying') {
++    event.preventDefault();
++    document.activeElement?.blur?.();
++    flight.paused = !flight.paused;
++  } else if (event.code === 'Escape' && flightPhase !== 'off') stopFlight();
++});
+ document.addEventListener('keyup', event => pressedCameraKeys.delete(event.code));
+ window.addEventListener('blur', () => pressedCameraKeys.clear());
+ 
+ function updateKeyboardCamera(deltaSeconds) {
++  if (flightPhase !== 'off') return; // flight reads the keys itself
+   if (!pressedCameraKeys.size) return;
+   const accelerated = pressedCameraKeys.has('ShiftLeft') || pressedCameraKeys.has('ShiftRight');
+   const speedMultiplier = accelerated ? 4 : 1;
+@@ -273,7 +319,7 @@ function keepGlobeCenteredWhileZoomingOut() {
+   const height = cameraHeight();
+   const zoomingOut = height > previousCenteringHeight * 1.0001;
+   previousCenteringHeight = height;
+-  if (mode === 'stargaze' || !zoomingOut || height < GLOBE_CENTERING_HEIGHT) return;
++  if (mode === 'stargaze' || flightPhase !== 'off' || !zoomingOut || height < GLOBE_CENTERING_HEIGHT) return;
+ 
+   Cartesian3.clone(camera.positionWC, centeredPosition);
+   Cartesian3.negate(centeredPosition, centeredDirection);
+@@ -350,6 +396,214 @@ function setStargazeCamera() {
+   updateMoon(observationDate());
+ }
+ 
++/* ---------- flight: first-person bird's-eye camera ---------- */
++// Flight is an overlay on Explore, Spacetime and Gaia rather than a mode of its
++// own, so any imagery can be flown over. The model lives in flight.js; this
++// section samples terrain, reads input and drives the camera.
++const FLIGHT_ENTRY_ALTITUDE = 60_000; // below this the camera takes off from where it is
++const flightRange = $('flight-speed');
++
++function sampleGround(lat, lng) {
++  flightCartographic.latitude = lat;
++  flightCartographic.longitude = lng;
++  flightCartographic.height = 0;
++  const height = globe.getHeight(flightCartographic);
++  return Number.isFinite(height) ? height : undefined;
++}
++
++function readFlightInput() {
++  const held = code => pressedCameraKeys.has(code);
++  const axis = (positive, negative) => (positive.some(held) ? 1 : 0) - (negative.some(held) ? 1 : 0);
++  const input = {
++    throttle: axis(['KeyW'], ['KeyS']),
++    turn: axis(['KeyD', 'ArrowRight'], ['KeyA', 'ArrowLeft']),
++    climb: axis(['KeyE'], ['KeyQ']),
++    pitch: axis(['ArrowUp'], ['ArrowDown']),
++    boost: held('ShiftLeft') || held('ShiftRight'),
++    lookX: flightLook.x,
++    lookY: flightLook.y,
++  };
++  flightLook.x = 0;
++  flightLook.y = 0;
++  return input;
++}
++
++function applyFlightCamera() {
++  camera.setView({
++    destination: Cartesian3.fromRadians(flight.lng, flight.lat, flight.height, globe.ellipsoid, flightPosition),
++    orientation: { heading: flight.heading, pitch: flight.pitch, roll: flight.roll },
++  });
++  if ('fov' in camera.frustum) camera.frustum.fov = flightFov;
++  // Load buildings, roads and daylight for the ground just ahead, not the point underneath.
++  const ahead = advance(flight.lat, flight.lng, flight.height, flight.heading, Math.min(flight.speed * 4, 2_500));
++  focus.lat = ahead.lat;
++  focus.lng = ahead.lng;
++}
++
++function updateFlight(deltaSeconds) {
++  if (flightPhase !== 'flying') return;
++  const zoom = (pressedCameraKeys.has('Minus') || pressedCameraKeys.has('NumpadSubtract') ? 1 : 0)
++    - (pressedCameraKeys.has('Equal') || pressedCameraKeys.has('NumpadAdd') ? 1 : 0);
++  if (zoom) flightFov = clamp(flightFov * Math.exp(zoom * deltaSeconds * 1.2), FLIGHT_LIMITS.minFov, FLIGHT_LIMITS.maxFov);
++
++  const here = sampleGround(flight.lat, flight.lng);
++  // Look-ahead is the expensive part, so refresh it at ~20 Hz.
++  if (flightFrame++ % 3 === 0) aheadGround = lookAheadPoints(flight).map(point => sampleGround(point.lat, point.lng));
++  stepFlight(flight, readFlightInput(), deltaSeconds, { here, ahead: aheadGround });
++  applyFlightCamera();
++}
++
++function initFlightFromCamera() {
++  const position = camera.positionCartographic;
++  flight.lat = clamp(position.latitude, -FLIGHT_LIMITS.maxLatitude, FLIGHT_LIMITS.maxLatitude);
++  flight.lng = position.longitude;
++  flight.height = position.height;
++  flight.heading = camera.heading;
++  flight.pitch = clamp(camera.pitch, -FLIGHT_LIMITS.maxPitch, FLIGHT_LIMITS.maxPitch);
++  flight.roll = 0;
++  flight.speed = 0;
++  flight.paused = false;
++  flight.ground = sampleGround(flight.lat, flight.lng);
++  if (flight.ground !== undefined && flight.follow) {
++    flight.agl = clamp(position.height - flight.ground, FLIGHT_LIMITS.minAgl, FLIGHT_LIMITS.maxAgl);
++  }
++  aheadGround = [];
++}
++
++function beginFlying() {
++  initFlightFromCamera();
++  flightPhase = 'flying';
++  syncFlightUi();
++}
++
++function startFlight() {
++  if (flightPhase !== 'off' || mode === 'stargaze') return;
++  camera.cancelFlight();
++  cameraController.enableInputs = false;
++  pressedCameraKeys.clear();
++  savedFov = 'fov' in camera.frustum ? camera.frustum.fov : null;
++  document.body.classList.add('flying');
++  flightPhase = 'entering';
++  syncFlightUi();
++  if (cameraHeight() < FLIGHT_ENTRY_ALTITUDE) {
++    beginFlying();
++    return;
++  }
++  // From orbit: glide down to the centre of the view, then hand over to the pilot.
++  const { lat, lng } = focus;
++  const height = (sampleGround(lat, lng) ?? 0) + Math.max(flight.agl, 800);
++  camera.flyTo({
++    destination: Cartesian3.fromRadians(lng, lat, height),
++    orientation: { heading: camera.heading, pitch: flight.pitch, roll: 0 },
++    duration: 3.2,
++    complete: () => { if (flightPhase === 'entering') beginFlying(); },
++  });
++}
++
++function stopFlight() {
++  if (flightPhase === 'off') return;
++  const wasFlying = flightPhase === 'flying';
++  camera.cancelFlight();
++  flightPhase = 'off';
++  flightDrag = null;
++  pressedCameraKeys.clear();
++  cameraController.enableInputs = true;
++  document.body.classList.remove('flying');
++  if (savedFov !== null && 'fov' in camera.frustum) camera.frustum.fov = savedFov;
++  if (wasFlying) camera.setView({ orientation: { heading: camera.heading, pitch: camera.pitch, roll: 0 } });
++  previousCenteringHeight = cameraHeight();
++  syncFlightUi();
++}
++
++function toggleFlight() {
++  if (flightPhase === 'off') startFlight();
++  else stopFlight();
++}
++
++function syncFlightUi() {
++  const active = flightPhase !== 'off';
++  for (const id of ['flight-start', 'fly-toggle']) $(id).setAttribute('aria-pressed', String(active));
++  $('flight-start').firstChild.textContent = active ? 'Land ' : 'Take flight ';
++  $('flight-start').querySelector('kbd').textContent = active ? 'Esc' : 'F';
++  $('fly-toggle').textContent = active ? 'Land' : 'Fly';
++  $('fly-toggle').title = active ? 'Land (Esc)' : 'Fly (F)';
++  $('flight-sub').textContent = flightPhase === 'flying' ? (flight.paused ? 'Paused' : 'Flying') : (active ? 'Descending…' : 'Bird’s-eye camera');
++  $('flight-hud').hidden = flightPhase !== 'flying';
++  $('flight-follow').checked = flight.follow;
++  $('flight-agl').disabled = !flight.follow;
++  $('flight-fov').value = Math.round(flightFov / D2R);
++  $('flight-fov-value').textContent = `${Math.round(flightFov / D2R)}°`;
++  const kmh = Math.round(metersPerSecondToKmh(flight.targetSpeed));
++  $('flight-speed-value').textContent = `${kmh.toLocaleString('en-US')} km/h`;
++  if (document.activeElement !== flightRange) {
++    flightRange.value = Math.round(toLogPosition(flight.targetSpeed, FLIGHT_LIMITS.minSpeed, FLIGHT_LIMITS.maxSpeed) * 1000);
++  }
++  $('flight-agl-value').textContent = formatDistance(flight.agl);
++  if (document.activeElement !== $('flight-agl')) {
++    $('flight-agl').value = Math.round(toLogPosition(flight.agl, FLIGHT_LIMITS.minAgl, FLIGHT_LIMITS.maxAgl) * 1000);
++  }
++}
++
++function updateFlightHud() {
++  if (flightPhase !== 'off') syncFlightUi();
++  if (flightPhase !== 'flying') return;
++  const degreesOf = radians => Math.round(radians * R2D);
++  const height = aboveGround(flight);
++  $('fh-speed').textContent = Math.round(metersPerSecondToKmh(flight.speed)).toLocaleString('en-US');
++  const [heightValue, heightUnit] = formatDistance(height ?? flight.height).split(' ');
++  $('fh-agl').textContent = heightValue;
++  $('fh-agl-unit').textContent = `${heightUnit} ${height === undefined ? 'alt' : 'AGL'}`;
++  $('fh-heading').textContent = `${String((degreesOf(flight.heading) + 360) % 360).padStart(3, '0')}°`;
++  $('fh-compass').textContent = compassLabel(flight.heading);
++  $('fh-pitch').textContent = `${degreesOf(flight.pitch) > 0 ? '+' : ''}${degreesOf(flight.pitch)}°`;
++  $('fh-state').textContent = flight.paused ? 'paused' : (flight.follow ? 'terrain' : 'free');
++  // Sit above the Spacetime/Gaia timeline when it is showing.
++  $('flight-hud').style.bottom = $('spacetime').hidden ? '' : `${$('spacetime').offsetHeight + 30}px`;
++}
++
++canvas.addEventListener('pointerdown', event => {
++  if (flightPhase !== 'flying') return;
++  flightDrag = { x: event.clientX, y: event.clientY };
++  canvas.setPointerCapture(event.pointerId);
++});
++canvas.addEventListener('pointermove', event => {
++  if (!flightDrag) return;
++  // Mouse-look: drag right to turn right, drag up to pitch up. One screen-width of drag turns by one field of view.
++  const radiansPerPixel = flightFov / Math.max(canvas.clientWidth, canvas.clientHeight, 1);
++  flightLook.x += (event.clientX - flightDrag.x) * radiansPerPixel;
++  flightLook.y -= (event.clientY - flightDrag.y) * radiansPerPixel;
++  flightDrag.x = event.clientX;
++  flightDrag.y = event.clientY;
++});
++for (const type of ['pointerup', 'pointercancel']) canvas.addEventListener(type, () => { flightDrag = null; });
++canvas.addEventListener('wheel', event => {
++  if (flightPhase !== 'flying') return;
++  event.preventDefault();
++  const delta = event.deltaMode === 1 ? event.deltaY * 33 : event.deltaY;
++  flight.targetSpeed = clamp(flight.targetSpeed * Math.exp(-delta * 0.0012), FLIGHT_LIMITS.minSpeed, FLIGHT_LIMITS.maxSpeed);
++}, { passive: false });
++
++$('fly-toggle').addEventListener('click', event => { event.currentTarget.blur(); toggleFlight(); });
++$('flight-start').addEventListener('click', event => { event.currentTarget.blur(); toggleFlight(); });
++flightRange.addEventListener('input', () => {
++  flight.targetSpeed = fromLogPosition(+flightRange.value / 1000, FLIGHT_LIMITS.minSpeed, FLIGHT_LIMITS.maxSpeed);
++  syncFlightUi();
++});
++$('flight-agl').addEventListener('input', () => {
++  flight.agl = fromLogPosition(+$('flight-agl').value / 1000, FLIGHT_LIMITS.minAgl, FLIGHT_LIMITS.maxAgl);
++  syncFlightUi();
++});
++$('flight-fov').addEventListener('input', () => {
++  flightFov = clamp(+$('flight-fov').value * D2R, FLIGHT_LIMITS.minFov, FLIGHT_LIMITS.maxFov);
++  syncFlightUi();
++});
++$('flight-follow').addEventListener('change', () => {
++  flight.follow = $('flight-follow').checked;
++  syncFlightUi();
++});
++// Release focus after adjusting so the flight keys keep working.
++for (const id of ['flight-speed', 'flight-agl', 'flight-fov', 'flight-follow']) $(id).addEventListener('change', event => event.currentTarget.blur());
++
+ function replaceTerrain() {
+   terrainProvider = makeTerrainProvider();
+   widget.terrainProvider = terrainProvider;
+@@ -926,6 +1180,7 @@ $('gaia-chips').replaceChildren(...['', ...GIBS_CATEGORIES.map(([label]) => labe
+ 
+ function setMode(nextMode) {
+   if (mode === nextMode) return;
++  if (nextMode === 'stargaze') stopFlight();
+   const previousMode = mode;
+   if (nextMode === 'spacetime') nonSpacetimeObservationDay = $('sky-date').value;
+   if (previousMode === 'stargaze') scene.screenSpaceCameraController.enableInputs = true;
+@@ -1096,7 +1351,15 @@ function flyTo(hit) {
+   const lat = clamp(hit.lat, -84, 84) * D2R;
+   const lng = wrapRadians(hit.lng * D2R);
+   if (mode === 'stargaze') setMode('explore');
+-  flyToCoordinates(lat, lng);
++  if (flightPhase === 'flying') {
++    teleportFlight(flight, lat, lng);
++    aheadGround = [];
++    focus.lat = lat;
++    focus.lng = lng;
++  } else {
++    stopFlight();
++    flyToCoordinates(lat, lng);
++  }
+   if (!$('cyc').checked) {
+     $('tod').value = (((14 - hit.lng / 15) % 24) + 24) % 24;
+     updateSun();
+@@ -1107,6 +1370,11 @@ setupUI({
+   search: geocode,
+   flyTo,
+   zoom: factor => {
++    if (flightPhase === 'flying') {
++      flightFov = clamp(flightFov * factor, FLIGHT_LIMITS.minFov, FLIGHT_LIMITS.maxFov);
++      syncFlightUi();
++      return;
++    }
+     if (mode === 'stargaze') {
+       skyFov = clamp(skyFov * factor, 18 * D2R, 90 * D2R);
+       setStargazeCamera();
+@@ -1117,12 +1385,14 @@ setupUI({
+     else camera.zoomOut(amount);
+   },
+   north: () => {
+-    if (mode === 'stargaze') {
++    if (flightPhase === 'flying') flight.heading = 0;
++    else if (mode === 'stargaze') {
+       skyAzimuth = 0;
+       setStargazeCamera();
+     } else camera.setView({ orientation: { heading: 0, pitch: camera.pitch, roll: 0 } });
+   },
+   home: () => {
++    stopFlight();
+     setMode('explore');
+     focus = { lat: INITIAL_VIEW.lat, lng: INITIAL_VIEW.lng };
+     setInitialCamera();
+@@ -1159,6 +1429,7 @@ if (import.meta.env.DEV && new URLSearchParams(location.search).has('debug')) {
+     cityOverlay: cityOverlay.stats(),
+     camera: { height: cameraHeight(), heading: camera.heading, pitch: camera.pitch },
+     focus: { latitude: focus.lat * R2D, longitude: focus.lng * R2D },
++    flight: { phase: flightPhase, ...flight, fov: flightFov * R2D },
+   });
+ }
+ 
+@@ -1167,6 +1438,7 @@ function animate(now) {
+   lastFrameTime = now;
+   frame += 1;
+   updateKeyboardCamera(deltaSeconds);
++  updateFlight(deltaSeconds);
+   keepGlobeCenteredWhileZoomingOut();
+   updateAdaptiveTilePriority(now, deltaSeconds);
+   if (liveTimeEnabled()) syncToCurrentTime();
+@@ -1178,18 +1450,20 @@ function animate(now) {
+   }
+   widget.resize();
+   if (frame % 8 === 0) {
+-    updateFocusFromView();
++    if (flightPhase !== 'flying') updateFocusFromView();
+     cityOverlay.update(focus, cameraHeight());
+     updateEnvironment();
+     updateSelectedStar();
+     scheduleDailyEvents();
+     updateHud();
++    updateFlightHud();
+   }
+   widget.render();
+   requestAnimationFrame(animate);
+ }
+ 
+ setInitialCamera();
++syncFlightUi();
+ setCredit();
+ syncSpacetimeDate();
+ setObservationControls(new Date());
+diff --git a/src/flight.js b/src/flight.js
+new file mode 100644
+index 0000000..0607ea2
+--- /dev/null
++++ b/src/flight.js
+@@ -0,0 +1,187 @@
++// First-person "bird's-eye" flight model. Pure maths: no Cesium, no DOM, so it
++// can be unit tested. The caller samples terrain and applies the result to the
++// camera (see cesium-main.js).
++//
++// Conventions match Cesium's camera: heading 0 = north, increasing clockwise
++// (east = +90°); pitch > 0 looks up; roll > 0 banks to the right.
++
++const D2R = Math.PI / 180;
++const WGS84_A = 6_378_137;
++const WGS84_E2 = 0.006_694_379_990_14;
++
++export const FLIGHT_LIMITS = Object.freeze({
++  minSpeed: 10,            // m/s
++  maxSpeed: 3_000,         // m/s
++  minAgl: 20,              // m above ground, terrain-follow target
++  maxAgl: 20_000,
++  maxHeight: 1_500_000,    // hard ceiling above the ellipsoid
++  clearance: 6,            // never closer than this to the terrain
++  maxLatitude: 84.5 * D2R, // terrain data ends near ±85°
++  maxPitch: 85 * D2R,
++  minFov: 35 * D2R,
++  maxFov: 110 * D2R,
++});
++
++export const FLIGHT_DEFAULTS = Object.freeze({
++  speed: 100,
++  agl: 900,
++  pitch: -10 * D2R,
++  fov: 70 * D2R,
++});
++
++const BOOST = 3;
++const TURN_RATE = 0.55;          // rad/s with a held turn key
++const PITCH_RATE = 0.7;          // rad/s with a held pitch key
++const THROTTLE_RATE = 0.9;       // e-folds per second of speed change
++const MAX_BANK = 0.5;            // rad of cosmetic roll
++const LOOKAHEAD_SECONDS = [0.6, 1.4, 2.6];
++const LOOKAHEAD_MAX_METERS = 6_000;
++
++const clamp = (value, lo, hi) => Math.min(hi, Math.max(lo, value));
++const wrapPi = value => ((value + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
++
++// Log-scale sliders: positions are 0..1 so ranges stay usable across 2–3 decades.
++export const toLogPosition = (value, lo, hi) => clamp(Math.log(value / lo) / Math.log(hi / lo), 0, 1);
++export const fromLogPosition = (position, lo, hi) => lo * (hi / lo) ** clamp(position, 0, 1);
++
++export function createFlight(overrides = {}) {
++  return {
++    lat: 0,
++    lng: 0,
++    height: 1_000,            // above the ellipsoid, metres
++    heading: 0,
++    pitch: FLIGHT_DEFAULTS.pitch,
++    roll: 0,
++    speed: 0,                 // current ground-relative speed, m/s
++    targetSpeed: FLIGHT_DEFAULTS.speed,
++    agl: FLIGHT_DEFAULTS.agl, // terrain-follow target clearance
++    follow: true,             // true: hold AGL; false: fly where you look
++    paused: false,
++    ground: undefined,        // last terrain height seen under the aircraft
++    ...overrides,
++  };
++}
++
++/** Metres per radian of latitude / longitude at a latitude and height. */
++export function metersPerRadian(lat, height = 0) {
++  const s = Math.sin(lat);
++  const w = 1 - WGS84_E2 * s * s;
++  const meridional = WGS84_A * (1 - WGS84_E2) / w ** 1.5;
++  const primeVertical = WGS84_A / Math.sqrt(w);
++  const h = Math.max(0, height);
++  return { lat: meridional + h, lng: (primeVertical + h) * Math.max(Math.cos(lat), 1e-6) };
++}
++
++/** Move along a constant heading (rhumb line) by `distance` metres. */
++export function advance(lat, lng, height, heading, distance) {
++  const m = metersPerRadian(lat, height);
++  const nextLat = clamp(lat + (distance * Math.cos(heading)) / m.lat, -FLIGHT_LIMITS.maxLatitude, FLIGHT_LIMITS.maxLatitude);
++  const nextLng = wrapPi(lng + (distance * Math.sin(heading)) / m.lng);
++  return { lat: nextLat, lng: nextLng };
++}
++
++/** Points ahead of the aircraft whose terrain height should be sampled. */
++export function lookAheadPoints(flight) {
++  if (flight.speed < 1) return [];
++  return LOOKAHEAD_SECONDS.map(seconds => {
++    const distance = Math.min(flight.speed * seconds, LOOKAHEAD_MAX_METERS);
++    return advance(flight.lat, flight.lng, flight.height, flight.heading, distance);
++  });
++}
++
++/** The highest of the defined terrain samples, or undefined if none are. */
++export function maxDefined(values) {
++  let best;
++  for (const value of values) if (Number.isFinite(value) && (best === undefined || value > best)) best = value;
++  return best;
++}
++
++/**
++ * Advance the flight by `dt` seconds.
++ * input: { throttle, turn, climb, pitch: -1..1, boost, lookX, lookY (radians this frame) }
++ * terrain: { here, ahead } terrain heights in metres (either may be undefined).
++ */
++export function stepFlight(flight, input, dt, terrain = {}) {
++  const L = FLIGHT_LIMITS;
++  const {
++    throttle = 0, turn = 0, climb = 0, pitch: pitchKey = 0, boost = false, lookX = 0, lookY = 0,
++  } = input;
++
++  // Speed: keys scale the cruise speed exponentially; boost and pause shape the effective target.
++  if (throttle) flight.targetSpeed = clamp(flight.targetSpeed * Math.exp(throttle * THROTTLE_RATE * dt), L.minSpeed, L.maxSpeed);
++  const wanted = flight.paused ? 0 : Math.min(flight.targetSpeed * (boost ? BOOST : 1), L.maxSpeed * BOOST);
++  flight.speed += (wanted - flight.speed) * (1 - Math.exp(-dt / (wanted > flight.speed ? 0.8 : 0.45)));
++  if (flight.speed < 0.05) flight.speed = 0;
++
++  // Heading and pitch.
++  const headingDelta = turn * TURN_RATE * dt + lookX;
++  flight.heading = wrapPi(flight.heading + headingDelta);
++  flight.pitch = clamp(flight.pitch + pitchKey * PITCH_RATE * dt + lookY, -L.maxPitch, L.maxPitch);
++
++  // Bank into turns for feel; the roll relaxes back to level.
++  const turnRate = dt > 0 ? headingDelta / dt : 0;
++  const bank = clamp(turnRate * 0.9, -MAX_BANK, MAX_BANK);
++  flight.roll += (bank - flight.roll) * (1 - Math.exp(-dt / 0.25));
++
++  // Horizontal motion.
++  const groundSpeed = flight.follow ? flight.speed : flight.speed * Math.cos(flight.pitch);
++  const moved = advance(flight.lat, flight.lng, flight.height, flight.heading, groundSpeed * dt);
++  flight.lat = moved.lat;
++  flight.lng = moved.lng;
++
++  // Terrain bookkeeping: never trust a missing sample to mean "ground is at 0".
++  const here = Number.isFinite(terrain.here) ? terrain.here : undefined;
++  const ahead = maxDefined([terrain.here, ...(Array.isArray(terrain.ahead) ? terrain.ahead : [terrain.ahead])]);
++  if (here !== undefined) flight.ground = here;
++  const groundKnown = ahead !== undefined || flight.ground !== undefined;
++  const ground = ahead ?? flight.ground;
++
++  // Vertical motion.
++  if (flight.follow) {
++    if (climb) flight.agl = clamp(flight.agl * Math.exp(climb * 0.9 * dt), L.minAgl, L.maxAgl);
++    if (groundKnown) {
++      const target = ground + flight.agl;
++      // Rise fast over ridges, descend gently into valleys.
++      const tau = target > flight.height ? 0.4 : 1.4;
++      flight.height += (target - flight.height) * (1 - Math.exp(-dt / tau));
++    }
++  } else {
++    const climbRate = 0.35 * Math.max(flight.speed, 60);
++    flight.height += Math.sin(flight.pitch) * flight.speed * dt + climb * climbRate * dt;
++  }
++
++  // Hard limits: ceiling, and keep clear of the terrain directly below.
++  flight.height = Math.min(flight.height, L.maxHeight);
++  if (flight.ground !== undefined) flight.height = Math.max(flight.height, flight.ground + L.clearance);
++  if (!flight.follow && flight.ground !== undefined) flight.agl = clamp(flight.height - flight.ground, L.minAgl, L.maxAgl);
++
++  return flight;
++}
++
++/** Height above the terrain last seen under the aircraft. */
++export function aboveGround(flight) {
++  return flight.ground === undefined ? undefined : Math.max(0, flight.height - flight.ground);
++}
++
++const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
++export function compassLabel(heading) {
++  const degrees = ((heading / D2R) % 360 + 360) % 360;
++  return COMPASS[Math.round(degrees / 45) % 8];
++}
++
++export function formatDistance(meters) {
++  const value = Math.abs(meters);
++  if (value < 1_000) return `${Math.round(meters).toLocaleString('en-US')} m`;
++  return `${(meters / 1_000).toFixed(value < 10_000 ? 2 : 1)} km`;
++}
++
++export const metersPerSecondToKmh = value => value * 3.6;
++
++/** Jump somewhere new. Terrain there is unknown, so start high and settle once it loads. */
++export function teleportFlight(flight, lat, lng) {
++  flight.lat = clamp(lat, -FLIGHT_LIMITS.maxLatitude, FLIGHT_LIMITS.maxLatitude);
++  flight.lng = wrapPi(lng);
++  flight.ground = undefined;
++  flight.height = Math.max(flight.height, 9_000);
++  return flight;
++}
+diff --git a/src/styles.css b/src/styles.css
+index 15f8b4c..b7e6d32 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -353,3 +353,37 @@ input[type="range"] { width: 100%; height: 16px; margin: 0; cursor: pointer; acc
+ .gaia-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+ .gaia-chip { padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text); font-size: 10px; cursor: pointer; }
+ .gaia-chip[aria-pressed="true"] { border-color: rgba(145, 201, 255, .6); background: rgba(145, 201, 255, .16); }
++
++/* Flight: first-person bird's-eye camera */
++.fly-toggle { color: var(--accent); font-size: 9px !important; font-weight: 650; letter-spacing: .02em; }
++.fly-toggle[aria-pressed="true"] { border-color: rgba(185, 216, 122, .55) !important; background: var(--accent) !important; color: var(--accent-ink); }
++.stargaze-mode .fly-toggle { display: none; }
++.flight-panel kbd, .flight-hud kbd { display: inline-block; min-width: 14px; padding: 0 4px; border: 1px solid var(--border-strong); border-radius: 3px; background: rgba(0, 0, 0, .22); color: var(--text-soft); font-family: inherit; font-size: 9px; font-weight: 600; line-height: 14px; text-align: center; }
++.flight-start { display: flex; align-items: center; justify-content: center; gap: 8px; height: 34px; border-radius: 5px; background: var(--accent); color: var(--accent-ink); font-size: 11px; font-weight: 700; }
++.flight-start:hover { background: #c9e594; }
++.flight-start kbd { border-color: rgba(23, 33, 15, .35); background: rgba(23, 33, 15, .12); color: var(--accent-ink); }
++.flight-start[aria-pressed="true"] { background: var(--surface-soft); color: var(--text); box-shadow: inset 0 0 0 1px var(--border-strong); }
++.flight-start[aria-pressed="true"] kbd { border-color: var(--border-strong); background: rgba(0, 0, 0, .22); color: var(--text-soft); }
++.flight-panel input[type="range"]:disabled { cursor: not-allowed; opacity: .4; }
++.flying .flight-panel > summary small { color: var(--accent); }
++/* Keep the Flight panel reachable in Spacetime and Gaia while airborne. */
++body.flying .explore-controls > .flight-panel { display: block; }
++
++.flight-hud { position: fixed; z-index: 9; bottom: 18px; left: 50%; display: flex; flex-direction: column; align-items: center; gap: 8px; transform: translateX(-50%); pointer-events: none; }
++.flight-readouts { display: flex; gap: 1px; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: rgba(6, 11, 13, .72); box-shadow: 0 10px 30px rgba(0, 0, 0, .3); backdrop-filter: blur(14px); }
++.flight-readouts > div { display: grid; min-width: 86px; grid-template-columns: 1fr; justify-items: start; gap: 1px; padding: 7px 14px 8px; }
++.flight-readouts > div + div { border-left: 1px solid var(--border); }
++.flight-readouts small { color: var(--text-faint); font-size: 8px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
++.flight-readouts strong { color: var(--text); font-size: 17px; font-variant-numeric: tabular-nums; font-weight: 600; letter-spacing: -.01em; }
++.flight-readouts em { color: var(--accent); font-size: 9px; font-style: normal; }
++.flight-hint { margin: 0; padding: 5px 11px; border: 1px solid var(--border); border-radius: 999px; background: rgba(6, 11, 13, .72); color: var(--text-soft); font-size: 9px; backdrop-filter: blur(14px); animation: flight-hint-fade 1s ease 9s forwards; }
++.flight-hint kbd + kbd { margin-left: 2px; }
++@keyframes flight-hint-fade { to { opacity: 0; visibility: hidden; } }
++.ui-minimal .flight-hud { display: none; }
++
++@media (max-width: 680px) {
++  .flight-hud { bottom: 64px; max-width: calc(100vw - 20px); }
++  .flight-readouts > div { min-width: 0; padding: 6px 9px 7px; }
++  .flight-readouts strong { font-size: 14px; }
++  .flight-hint { display: none; }
++}
+diff --git a/tests/flight.test.js b/tests/flight.test.js
+new file mode 100644
+index 0000000..7ebcdf2
+--- /dev/null
++++ b/tests/flight.test.js
+@@ -0,0 +1,155 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {
++  FLIGHT_LIMITS,
++  advance,
++  aboveGround,
++  compassLabel,
++  createFlight,
++  fromLogPosition,
++  lookAheadPoints,
++  maxDefined,
++  metersPerRadian,
++  stepFlight,
++  teleportFlight,
++  toLogPosition,
++} from '../src/flight.js';
++
++const D2R = Math.PI / 180;
++const run = (flight, input, seconds, terrain = () => ({ here: 0 }), dt = 1 / 60) => {
++  for (let t = 0; t < seconds; t += dt) stepFlight(flight, input, dt, terrain(flight));
++  return flight;
++};
++
++test('advance heads north, east and wraps the antimeridian', () => {
++  const north = advance(0, 0, 0, 0, 111_000);
++  assert.ok(Math.abs(north.lat / D2R - 1) < 0.01);
++  assert.ok(Math.abs(north.lng) < 1e-9);
++  const east = advance(0, 0, 0, Math.PI / 2, 111_320);
++  assert.ok(Math.abs(east.lng / D2R - 1) < 0.01);
++  const wrap = advance(0, 179.9 * D2R, 0, Math.PI / 2, 50_000);
++  assert.ok(wrap.lng < 0, 'longitude wrapped past +180');
++});
++
++test('longitude steps grow toward the poles and latitude is clamped', () => {
++  assert.ok(metersPerRadian(80 * D2R).lng < metersPerRadian(0).lng * 0.2);
++  const pole = advance(84 * D2R, 0, 0, 0, 5_000_000);
++  assert.ok(pole.lat <= FLIGHT_LIMITS.maxLatitude + 1e-12);
++});
++
++test('speed eases toward the target and pause brakes to a stop', () => {
++  const flight = createFlight({ targetSpeed: 200, ground: 0, height: 900 });
++  run(flight, {}, 5);
++  assert.ok(Math.abs(flight.speed - 200) < 2);
++  flight.paused = true;
++  run(flight, {}, 5);
++  assert.equal(flight.speed, 0);
++});
++
++test('throttle scales cruise speed and respects limits', () => {
++  const flight = createFlight({ targetSpeed: 100, ground: 0 });
++  run(flight, { throttle: 1 }, 60);
++  assert.equal(flight.targetSpeed, FLIGHT_LIMITS.maxSpeed);
++  run(flight, { throttle: -1 }, 120);
++  assert.equal(flight.targetSpeed, FLIGHT_LIMITS.minSpeed);
++});
++
++test('boost raises the effective speed without changing the cruise target', () => {
++  const flight = createFlight({ targetSpeed: 100, ground: 0 });
++  run(flight, { boost: true }, 6);
++  assert.ok(flight.speed > 280);
++  assert.equal(flight.targetSpeed, 100);
++});
++
++test('turning changes heading and banks right for a right turn', () => {
++  const flight = createFlight({ speed: 100, targetSpeed: 100, ground: 0 });
++  run(flight, { turn: 1 }, 1);
++  assert.ok(flight.heading > 0.4 && flight.heading < 0.7);
++  assert.ok(flight.roll > 0.1, 'right turn banks right (positive roll)');
++  run(flight, {}, 3);
++  assert.ok(Math.abs(flight.roll) < 0.02, 'roll relaxes to level');
++});
++
++test('mouse look moves heading and clamps pitch', () => {
++  const flight = createFlight({ ground: 0 });
++  stepFlight(flight, { lookX: 0.2, lookY: 5 }, 1 / 60, { here: 0 });
++  assert.ok(Math.abs(flight.heading - 0.2) < 1e-9);
++  assert.ok(flight.pitch <= FLIGHT_LIMITS.maxPitch + 1e-12);
++});
++
++test('terrain follow holds AGL over flat ground', () => {
++  const flight = createFlight({ lat: 0.2, lng: 0.2, height: 900, agl: 900, speed: 100, targetSpeed: 100, pitch: -0.5 });
++  run(flight, {}, 10, () => ({ here: 200 }));
++  assert.ok(Math.abs(aboveGround(flight) - 900) < 5);
++  assert.ok(Math.abs(flight.height - 1100) < 5);
++});
++
++test('terrain follow climbs ahead of a ridge using look-ahead', () => {
++  const flight = createFlight({ lat: 0, lng: 0, height: 1_000, agl: 500, speed: 200, targetSpeed: 200, ground: 0 });
++  // Ground is flat until 600 m ahead, then a 2 km wall.
++  stepFlight(flight, {}, 1 / 60, { here: 0, ahead: [0, 0, 2_000] });
++  assert.ok(flight.height > 1_000, 'starts climbing before the ridge is underneath');
++});
++
++test('never descends into terrain, even in free flight pointing down', () => {
++  const flight = createFlight({ follow: false, height: 400, speed: 300, targetSpeed: 300, pitch: -1.2, ground: 100 });
++  run(flight, {}, 10, () => ({ here: 100 }));
++  assert.ok(flight.height >= 100 + FLIGHT_LIMITS.clearance - 1e-9);
++});
++
++test('free flight climbs where you look and Q/E-style climb works', () => {
++  const flight = createFlight({ follow: false, height: 1_000, speed: 100, targetSpeed: 100, pitch: 0.3, ground: 0 });
++  run(flight, {}, 2);
++  assert.ok(flight.height > 1_050);
++  const before = flight.height;
++  run(flight, { climb: -1 }, 1);
++  assert.ok(flight.height < before + 40);
++});
++
++test('terrain-follow altitude control scales AGL within limits', () => {
++  const flight = createFlight({ agl: 900, ground: 0, height: 900 });
++  run(flight, { climb: 1 }, 30);
++  assert.equal(flight.agl, FLIGHT_LIMITS.maxAgl);
++  run(flight, { climb: -1 }, 60);
++  assert.equal(flight.agl, FLIGHT_LIMITS.minAgl);
++});
++
++test('unknown terrain never snaps the aircraft to sea level', () => {
++  const flight = createFlight({ height: 3_000, agl: 500, speed: 100, targetSpeed: 100 });
++  run(flight, {}, 3, () => ({ here: undefined, ahead: [undefined, undefined] }));
++  assert.equal(flight.height, 3_000);
++});
++
++test('ceiling is enforced', () => {
++  const flight = createFlight({ follow: false, height: FLIGHT_LIMITS.maxHeight - 10, speed: 1_000, targetSpeed: 1_000, pitch: 1.2, ground: 0 });
++  run(flight, {}, 5);
++  assert.equal(flight.height, FLIGHT_LIMITS.maxHeight);
++});
++
++test('look-ahead points lie along the heading and are empty when stopped', () => {
++  assert.deepEqual(lookAheadPoints(createFlight({ speed: 0 })), []);
++  const points = lookAheadPoints(createFlight({ speed: 500, heading: Math.PI / 2 }));
++  assert.equal(points.length, 3);
++  assert.ok(points[0].lng < points[2].lng && Math.abs(points[2].lat) < 1e-9);
++});
++
++test('teleport clears terrain knowledge and starts high', () => {
++  const flight = createFlight({ height: 500, ground: 20 });
++  teleportFlight(flight, 27.99 * D2R, 86.92 * D2R);
++  assert.equal(flight.ground, undefined);
++  assert.ok(flight.height >= 9_000);
++});
++
++test('log sliders round-trip', () => {
++  for (const value of [10, 100, 900, 3000]) {
++    assert.ok(Math.abs(fromLogPosition(toLogPosition(value, 10, 3000), 10, 3000) - value) < 1e-6);
++  }
++});
++
++test('helpers', () => {
++  assert.equal(maxDefined([undefined, 5, NaN, 9, 2]), 9);
++  assert.equal(maxDefined([undefined]), undefined);
++  assert.equal(compassLabel(0), 'N');
++  assert.equal(compassLabel(Math.PI / 2), 'E');
++  assert.equal(compassLabel(-Math.PI / 2), 'W');
++});

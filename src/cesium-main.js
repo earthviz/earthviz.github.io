@@ -44,6 +44,21 @@ import {
   previousUtcDate,
 } from './spacetime.js';
 import { apparentSolarAltitude, horizonDip, solarPhase } from './sky-model.js';
+import {
+  FLIGHT_DEFAULTS,
+  FLIGHT_LIMITS,
+  aboveGround,
+  advance,
+  compassLabel,
+  createFlight,
+  formatDistance,
+  fromLogPosition,
+  lookAheadPoints,
+  metersPerSecondToKmh,
+  stepFlight,
+  teleportFlight,
+  toLogPosition,
+} from './flight.js';
 import { TerrariumTerrainProvider } from './cesium/terrarium-terrain-provider.js';
 import { TERRAIN_SOURCES } from './cesium/terrarium.js';
 import { GIBS_CATEGORIES, fetchGibsCatalog, formatGibsTime, matchesCategory, snapTime, stepTime } from './gibs-catalog.js';
@@ -89,6 +104,17 @@ let skyAzimuth = 0;
 let skyAltitude = 25 * D2R;
 let skyFov = 60 * D2R;
 let stargazeDrag = null;
+// Flight: 'off' | 'entering' (camera gliding down to the start pose) | 'flying'.
+const flight = createFlight();
+let flightPhase = 'off';
+let flightFov = FLIGHT_DEFAULTS.fov;
+let savedFov = null;
+let flightDrag = null;
+let flightFrame = 0;
+let aheadGround = [];
+const flightLook = { x: 0, y: 0 };
+const flightCartographic = new Cartographic();
+const flightPosition = new Cartesian3();
 let starCatalog = [];
 let starEquatorial = [];
 let starPoints = null;
@@ -210,15 +236,35 @@ function isTypingTarget(target) {
     && (target.matches('input, textarea, select, button') || target.closest('[contenteditable="true"]'));
 }
 
+// While flying, sliders and switches in the Flight panel must not swallow flight keys.
+function isTextEntryTarget(target) {
+  return target instanceof Element
+    && (target.matches('input:not([type="range"]):not([type="checkbox"]), textarea, select') || target.closest('[contenteditable="true"]'));
+}
+
 document.addEventListener('keydown', event => {
-  if (!cameraKeyCodes.has(event.code) || event.ctrlKey || event.metaKey || isTypingTarget(event.target)) return;
+  const blocked = flightPhase === 'off' ? isTypingTarget(event.target) : isTextEntryTarget(event.target);
+  if (!cameraKeyCodes.has(event.code) || event.ctrlKey || event.metaKey || blocked) return;
   pressedCameraKeys.add(event.code);
   event.preventDefault();
+});
+document.addEventListener('keydown', event => {
+  if (event.ctrlKey || event.metaKey || event.altKey || event.repeat || isTextEntryTarget(event.target)) return;
+  if (event.code === 'KeyF' && mode !== 'stargaze') {
+    event.preventDefault();
+    document.activeElement?.blur?.();
+    toggleFlight();
+  } else if (event.code === 'Space' && flightPhase === 'flying') {
+    event.preventDefault();
+    document.activeElement?.blur?.();
+    flight.paused = !flight.paused;
+  } else if (event.code === 'Escape' && flightPhase !== 'off') stopFlight();
 });
 document.addEventListener('keyup', event => pressedCameraKeys.delete(event.code));
 window.addEventListener('blur', () => pressedCameraKeys.clear());
 
 function updateKeyboardCamera(deltaSeconds) {
+  if (flightPhase !== 'off') return; // flight reads the keys itself
   if (!pressedCameraKeys.size) return;
   const accelerated = pressedCameraKeys.has('ShiftLeft') || pressedCameraKeys.has('ShiftRight');
   const speedMultiplier = accelerated ? 4 : 1;
@@ -273,7 +319,7 @@ function keepGlobeCenteredWhileZoomingOut() {
   const height = cameraHeight();
   const zoomingOut = height > previousCenteringHeight * 1.0001;
   previousCenteringHeight = height;
-  if (mode === 'stargaze' || !zoomingOut || height < GLOBE_CENTERING_HEIGHT) return;
+  if (mode === 'stargaze' || flightPhase !== 'off' || !zoomingOut || height < GLOBE_CENTERING_HEIGHT) return;
 
   Cartesian3.clone(camera.positionWC, centeredPosition);
   Cartesian3.negate(centeredPosition, centeredDirection);
@@ -349,6 +395,214 @@ function setStargazeCamera() {
   if ('fov' in camera.frustum) camera.frustum.fov = skyFov;
   updateMoon(observationDate());
 }
+
+/* ---------- flight: first-person bird's-eye camera ---------- */
+// Flight is an overlay on Explore, Spacetime and Gaia rather than a mode of its
+// own, so any imagery can be flown over. The model lives in flight.js; this
+// section samples terrain, reads input and drives the camera.
+const FLIGHT_ENTRY_ALTITUDE = 60_000; // below this the camera takes off from where it is
+const flightRange = $('flight-speed');
+
+function sampleGround(lat, lng) {
+  flightCartographic.latitude = lat;
+  flightCartographic.longitude = lng;
+  flightCartographic.height = 0;
+  const height = globe.getHeight(flightCartographic);
+  return Number.isFinite(height) ? height : undefined;
+}
+
+function readFlightInput() {
+  const held = code => pressedCameraKeys.has(code);
+  const axis = (positive, negative) => (positive.some(held) ? 1 : 0) - (negative.some(held) ? 1 : 0);
+  const input = {
+    throttle: axis(['KeyW'], ['KeyS']),
+    turn: axis(['KeyD', 'ArrowRight'], ['KeyA', 'ArrowLeft']),
+    climb: axis(['KeyE'], ['KeyQ']),
+    pitch: axis(['ArrowUp'], ['ArrowDown']),
+    boost: held('ShiftLeft') || held('ShiftRight'),
+    lookX: flightLook.x,
+    lookY: flightLook.y,
+  };
+  flightLook.x = 0;
+  flightLook.y = 0;
+  return input;
+}
+
+function applyFlightCamera() {
+  camera.setView({
+    destination: Cartesian3.fromRadians(flight.lng, flight.lat, flight.height, globe.ellipsoid, flightPosition),
+    orientation: { heading: flight.heading, pitch: flight.pitch, roll: flight.roll },
+  });
+  if ('fov' in camera.frustum) camera.frustum.fov = flightFov;
+  // Load buildings, roads and daylight for the ground just ahead, not the point underneath.
+  const ahead = advance(flight.lat, flight.lng, flight.height, flight.heading, Math.min(flight.speed * 4, 2_500));
+  focus.lat = ahead.lat;
+  focus.lng = ahead.lng;
+}
+
+function updateFlight(deltaSeconds) {
+  if (flightPhase !== 'flying') return;
+  const zoom = (pressedCameraKeys.has('Minus') || pressedCameraKeys.has('NumpadSubtract') ? 1 : 0)
+    - (pressedCameraKeys.has('Equal') || pressedCameraKeys.has('NumpadAdd') ? 1 : 0);
+  if (zoom) flightFov = clamp(flightFov * Math.exp(zoom * deltaSeconds * 1.2), FLIGHT_LIMITS.minFov, FLIGHT_LIMITS.maxFov);
+
+  const here = sampleGround(flight.lat, flight.lng);
+  // Look-ahead is the expensive part, so refresh it at ~20 Hz.
+  if (flightFrame++ % 3 === 0) aheadGround = lookAheadPoints(flight).map(point => sampleGround(point.lat, point.lng));
+  stepFlight(flight, readFlightInput(), deltaSeconds, { here, ahead: aheadGround });
+  applyFlightCamera();
+}
+
+function initFlightFromCamera() {
+  const position = camera.positionCartographic;
+  flight.lat = clamp(position.latitude, -FLIGHT_LIMITS.maxLatitude, FLIGHT_LIMITS.maxLatitude);
+  flight.lng = position.longitude;
+  flight.height = position.height;
+  flight.heading = camera.heading;
+  flight.pitch = clamp(camera.pitch, -FLIGHT_LIMITS.maxPitch, FLIGHT_LIMITS.maxPitch);
+  flight.roll = 0;
+  flight.speed = 0;
+  flight.paused = false;
+  flight.ground = sampleGround(flight.lat, flight.lng);
+  if (flight.ground !== undefined && flight.follow) {
+    flight.agl = clamp(position.height - flight.ground, FLIGHT_LIMITS.minAgl, FLIGHT_LIMITS.maxAgl);
+  }
+  aheadGround = [];
+}
+
+function beginFlying() {
+  initFlightFromCamera();
+  flightPhase = 'flying';
+  syncFlightUi();
+}
+
+function startFlight() {
+  if (flightPhase !== 'off' || mode === 'stargaze') return;
+  camera.cancelFlight();
+  cameraController.enableInputs = false;
+  pressedCameraKeys.clear();
+  savedFov = 'fov' in camera.frustum ? camera.frustum.fov : null;
+  document.body.classList.add('flying');
+  flightPhase = 'entering';
+  syncFlightUi();
+  if (cameraHeight() < FLIGHT_ENTRY_ALTITUDE) {
+    beginFlying();
+    return;
+  }
+  // From orbit: glide down to the centre of the view, then hand over to the pilot.
+  const { lat, lng } = focus;
+  const height = (sampleGround(lat, lng) ?? 0) + Math.max(flight.agl, 800);
+  camera.flyTo({
+    destination: Cartesian3.fromRadians(lng, lat, height),
+    orientation: { heading: camera.heading, pitch: flight.pitch, roll: 0 },
+    duration: 3.2,
+    complete: () => { if (flightPhase === 'entering') beginFlying(); },
+  });
+}
+
+function stopFlight() {
+  if (flightPhase === 'off') return;
+  const wasFlying = flightPhase === 'flying';
+  camera.cancelFlight();
+  flightPhase = 'off';
+  flightDrag = null;
+  pressedCameraKeys.clear();
+  cameraController.enableInputs = true;
+  document.body.classList.remove('flying');
+  if (savedFov !== null && 'fov' in camera.frustum) camera.frustum.fov = savedFov;
+  if (wasFlying) camera.setView({ orientation: { heading: camera.heading, pitch: camera.pitch, roll: 0 } });
+  previousCenteringHeight = cameraHeight();
+  syncFlightUi();
+}
+
+function toggleFlight() {
+  if (flightPhase === 'off') startFlight();
+  else stopFlight();
+}
+
+function syncFlightUi() {
+  const active = flightPhase !== 'off';
+  for (const id of ['flight-start', 'fly-toggle']) $(id).setAttribute('aria-pressed', String(active));
+  $('flight-start').firstChild.textContent = active ? 'Land ' : 'Take flight ';
+  $('flight-start').querySelector('kbd').textContent = active ? 'Esc' : 'F';
+  $('fly-toggle').textContent = active ? 'Land' : 'Fly';
+  $('fly-toggle').title = active ? 'Land (Esc)' : 'Fly (F)';
+  $('flight-sub').textContent = flightPhase === 'flying' ? (flight.paused ? 'Paused' : 'Flying') : (active ? 'Descending…' : 'Bird’s-eye camera');
+  $('flight-hud').hidden = flightPhase !== 'flying';
+  $('flight-follow').checked = flight.follow;
+  $('flight-agl').disabled = !flight.follow;
+  $('flight-fov').value = Math.round(flightFov / D2R);
+  $('flight-fov-value').textContent = `${Math.round(flightFov / D2R)}°`;
+  const kmh = Math.round(metersPerSecondToKmh(flight.targetSpeed));
+  $('flight-speed-value').textContent = `${kmh.toLocaleString('en-US')} km/h`;
+  if (document.activeElement !== flightRange) {
+    flightRange.value = Math.round(toLogPosition(flight.targetSpeed, FLIGHT_LIMITS.minSpeed, FLIGHT_LIMITS.maxSpeed) * 1000);
+  }
+  $('flight-agl-value').textContent = formatDistance(flight.agl);
+  if (document.activeElement !== $('flight-agl')) {
+    $('flight-agl').value = Math.round(toLogPosition(flight.agl, FLIGHT_LIMITS.minAgl, FLIGHT_LIMITS.maxAgl) * 1000);
+  }
+}
+
+function updateFlightHud() {
+  if (flightPhase !== 'off') syncFlightUi();
+  if (flightPhase !== 'flying') return;
+  const degreesOf = radians => Math.round(radians * R2D);
+  const height = aboveGround(flight);
+  $('fh-speed').textContent = Math.round(metersPerSecondToKmh(flight.speed)).toLocaleString('en-US');
+  const [heightValue, heightUnit] = formatDistance(height ?? flight.height).split(' ');
+  $('fh-agl').textContent = heightValue;
+  $('fh-agl-unit').textContent = `${heightUnit} ${height === undefined ? 'alt' : 'AGL'}`;
+  $('fh-heading').textContent = `${String((degreesOf(flight.heading) + 360) % 360).padStart(3, '0')}°`;
+  $('fh-compass').textContent = compassLabel(flight.heading);
+  $('fh-pitch').textContent = `${degreesOf(flight.pitch) > 0 ? '+' : ''}${degreesOf(flight.pitch)}°`;
+  $('fh-state').textContent = flight.paused ? 'paused' : (flight.follow ? 'terrain' : 'free');
+  // Sit above the Spacetime/Gaia timeline when it is showing.
+  $('flight-hud').style.bottom = $('spacetime').hidden ? '' : `${$('spacetime').offsetHeight + 30}px`;
+}
+
+canvas.addEventListener('pointerdown', event => {
+  if (flightPhase !== 'flying') return;
+  flightDrag = { x: event.clientX, y: event.clientY };
+  canvas.setPointerCapture(event.pointerId);
+});
+canvas.addEventListener('pointermove', event => {
+  if (!flightDrag) return;
+  // Mouse-look: drag right to turn right, drag up to pitch up. One screen-width of drag turns by one field of view.
+  const radiansPerPixel = flightFov / Math.max(canvas.clientWidth, canvas.clientHeight, 1);
+  flightLook.x += (event.clientX - flightDrag.x) * radiansPerPixel;
+  flightLook.y -= (event.clientY - flightDrag.y) * radiansPerPixel;
+  flightDrag.x = event.clientX;
+  flightDrag.y = event.clientY;
+});
+for (const type of ['pointerup', 'pointercancel']) canvas.addEventListener(type, () => { flightDrag = null; });
+canvas.addEventListener('wheel', event => {
+  if (flightPhase !== 'flying') return;
+  event.preventDefault();
+  const delta = event.deltaMode === 1 ? event.deltaY * 33 : event.deltaY;
+  flight.targetSpeed = clamp(flight.targetSpeed * Math.exp(-delta * 0.0012), FLIGHT_LIMITS.minSpeed, FLIGHT_LIMITS.maxSpeed);
+}, { passive: false });
+
+$('fly-toggle').addEventListener('click', event => { event.currentTarget.blur(); toggleFlight(); });
+$('flight-start').addEventListener('click', event => { event.currentTarget.blur(); toggleFlight(); });
+flightRange.addEventListener('input', () => {
+  flight.targetSpeed = fromLogPosition(+flightRange.value / 1000, FLIGHT_LIMITS.minSpeed, FLIGHT_LIMITS.maxSpeed);
+  syncFlightUi();
+});
+$('flight-agl').addEventListener('input', () => {
+  flight.agl = fromLogPosition(+$('flight-agl').value / 1000, FLIGHT_LIMITS.minAgl, FLIGHT_LIMITS.maxAgl);
+  syncFlightUi();
+});
+$('flight-fov').addEventListener('input', () => {
+  flightFov = clamp(+$('flight-fov').value * D2R, FLIGHT_LIMITS.minFov, FLIGHT_LIMITS.maxFov);
+  syncFlightUi();
+});
+$('flight-follow').addEventListener('change', () => {
+  flight.follow = $('flight-follow').checked;
+  syncFlightUi();
+});
+// Release focus after adjusting so the flight keys keep working.
+for (const id of ['flight-speed', 'flight-agl', 'flight-fov', 'flight-follow']) $(id).addEventListener('change', event => event.currentTarget.blur());
 
 function replaceTerrain() {
   terrainProvider = makeTerrainProvider();
@@ -926,6 +1180,7 @@ $('gaia-chips').replaceChildren(...['', ...GIBS_CATEGORIES.map(([label]) => labe
 
 function setMode(nextMode) {
   if (mode === nextMode) return;
+  if (nextMode === 'stargaze') stopFlight();
   const previousMode = mode;
   if (nextMode === 'spacetime') nonSpacetimeObservationDay = $('sky-date').value;
   if (previousMode === 'stargaze') scene.screenSpaceCameraController.enableInputs = true;
@@ -1096,7 +1351,15 @@ function flyTo(hit) {
   const lat = clamp(hit.lat, -84, 84) * D2R;
   const lng = wrapRadians(hit.lng * D2R);
   if (mode === 'stargaze') setMode('explore');
-  flyToCoordinates(lat, lng);
+  if (flightPhase === 'flying') {
+    teleportFlight(flight, lat, lng);
+    aheadGround = [];
+    focus.lat = lat;
+    focus.lng = lng;
+  } else {
+    stopFlight();
+    flyToCoordinates(lat, lng);
+  }
   if (!$('cyc').checked) {
     $('tod').value = (((14 - hit.lng / 15) % 24) + 24) % 24;
     updateSun();
@@ -1107,6 +1370,11 @@ setupUI({
   search: geocode,
   flyTo,
   zoom: factor => {
+    if (flightPhase === 'flying') {
+      flightFov = clamp(flightFov * factor, FLIGHT_LIMITS.minFov, FLIGHT_LIMITS.maxFov);
+      syncFlightUi();
+      return;
+    }
     if (mode === 'stargaze') {
       skyFov = clamp(skyFov * factor, 18 * D2R, 90 * D2R);
       setStargazeCamera();
@@ -1117,12 +1385,14 @@ setupUI({
     else camera.zoomOut(amount);
   },
   north: () => {
-    if (mode === 'stargaze') {
+    if (flightPhase === 'flying') flight.heading = 0;
+    else if (mode === 'stargaze') {
       skyAzimuth = 0;
       setStargazeCamera();
     } else camera.setView({ orientation: { heading: 0, pitch: camera.pitch, roll: 0 } });
   },
   home: () => {
+    stopFlight();
     setMode('explore');
     focus = { lat: INITIAL_VIEW.lat, lng: INITIAL_VIEW.lng };
     setInitialCamera();
@@ -1159,6 +1429,7 @@ if (import.meta.env.DEV && new URLSearchParams(location.search).has('debug')) {
     cityOverlay: cityOverlay.stats(),
     camera: { height: cameraHeight(), heading: camera.heading, pitch: camera.pitch },
     focus: { latitude: focus.lat * R2D, longitude: focus.lng * R2D },
+    flight: { phase: flightPhase, ...flight, fov: flightFov * R2D },
   });
 }
 
@@ -1167,6 +1438,7 @@ function animate(now) {
   lastFrameTime = now;
   frame += 1;
   updateKeyboardCamera(deltaSeconds);
+  updateFlight(deltaSeconds);
   keepGlobeCenteredWhileZoomingOut();
   updateAdaptiveTilePriority(now, deltaSeconds);
   if (liveTimeEnabled()) syncToCurrentTime();
@@ -1178,18 +1450,20 @@ function animate(now) {
   }
   widget.resize();
   if (frame % 8 === 0) {
-    updateFocusFromView();
+    if (flightPhase !== 'flying') updateFocusFromView();
     cityOverlay.update(focus, cameraHeight());
     updateEnvironment();
     updateSelectedStar();
     scheduleDailyEvents();
     updateHud();
+    updateFlightHud();
   }
   widget.render();
   requestAnimationFrame(animate);
 }
 
 setInitialCamera();
+syncFlightUi();
 setCredit();
 syncSpacetimeDate();
 setObservationControls(new Date());

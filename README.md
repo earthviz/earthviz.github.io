@@ -25,11 +25,17 @@ The app ships a restrictive Content Security Policy that permits requests only t
 - **Spacetime**: daily NASA GIBS Terra, Aqua, Suomi NPP, or NOAA-20 imagery, one explicitly loaded date at a time.
 - **Stargaze**: look at the local night sky from the selected latitude and longitude.
 
+Flight is not a mode: it overlays Explore, Spacetime, and Gaia (see below).
+
 ### Controls
 
 The full-width search opens suggested destinations on focus and offers city suggestions as you type. Press **Explore** for a broader place/landmark search, or enter `latitude, longitude`. Use **↑ / ↓** and **Enter** to choose a suggestion, **Escape** to dismiss it, and **Ctrl/Cmd + K** to focus search.
 
 Left-drag pans, right-drag orbits around the picked surface, middle-drag or Shift-drag free-looks, and the wheel zooms. WASD moves the camera, Q/E moves vertically, arrow keys look, and Shift accelerates held keys. The lower-right buttons zoom, face north, or return to the initial view.
+
+### Flight
+
+Press **F** (or **Fly**, lower right) for a first-person bird's-eye camera over any imagery in Explore, Spacetime, or Gaia. **W/S** or the wheel set speed (10 m/s to 3,000 m/s, log scale), **A/D** turn with a cosmetic bank, **Q/E** change height, drag or **↑/↓** looks and pitches, **Shift** boosts, **Space** pauses, and **Esc** lands. With **Follow terrain** on (default) the camera holds a chosen height above ground and samples terrain ahead so it climbs before ridges; with it off the flight path follows the camera pitch. The flight model is pure maths in `src/flight.js` (tested in `tests/flight.test.js`); `cesium-main.js` samples `globe.getHeight`, reads input, and drives the camera. 3D buildings and roads load around the point ahead of the camera.
 
 Map and terrain settings are at the upper left; lighting controls at the upper right. Location and loading status appear at the lower left. On narrow screens only one settings panel opens at a time. Credits and tips are in the footer.
 
