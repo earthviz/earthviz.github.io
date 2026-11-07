@@ -1,0 +1,40 @@
+diff --git a/docs/index.html b/docs/index.html
+index 602e377..be7a14f 100644
+--- a/docs/index.html
++++ b/docs/index.html
+@@ -6,7 +6,7 @@
+     <meta name="referrer" content="no-referrer">
+     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; frame-src 'none'; form-action 'self'; upgrade-insecure-requests; block-all-mixed-content">
+     <meta name="theme-color" content="#10191c">
+-    <meta name="description" content="Learn how to explore Earth, browse imagery through time, and stargaze with Earthviz.">
++    <meta name="description" content="Learn how to explore Earth, browse imagery through time, explore NASA satellite layers, and stargaze with Earthviz.">
+     <title>How To Use · Earthviz</title>
+     <link rel="icon" href="/earthviz-logo.svg" type="image/svg+xml">
+     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" sizes="180x180">
+@@ -38,7 +38,7 @@
+           <ol>
+             <li>Open the globe and drag anywhere on Earth to begin exploring.</li>
+             <li>Search for a place or enter coordinates in the bar at the top.</li>
+-            <li>Choose <strong>Explore</strong>, <strong>Spacetime</strong>, or <strong>Stargaze</strong> to change what you are viewing.</li>
++            <li>Choose <strong>Explore</strong>, <strong>Spacetime</strong>, <strong>Gaia</strong>, or <strong>Stargaze</strong> to change what you are viewing.</li>
+             <li>Open the panels on the left to adjust imagery, terrain, human elements, or sky conditions.</li>
+           </ol>
+           <div class="callout">Earthviz streams imagery and terrain as you move. A newly visited area may take a moment to sharpen, especially at high detail.</div>
+@@ -68,6 +68,7 @@
+           <div class="mode-grid">
+             <article class="mode-card"><strong>Explore</strong><p>Browse current satellite basemaps, terrain relief, roads, buildings, and live lighting.</p></article>
+             <article class="mode-card"><strong>Spacetime</strong><p>Choose a date and inspect available NASA Earth-observation imagery for that day.</p></article>
++            <article class="mode-card"><strong>Gaia</strong><p>Browse the full NASA GIBS catalogue of satellite layers and view any of them live on the globe.</p></article>
+             <article class="mode-card"><strong>Stargaze</strong><p>Look at the simulated sky from the selected location, date, and UTC time.</p></article>
+           </div>
+ 
+@@ -77,6 +78,9 @@
+           <h3>Spacetime</h3>
+           <p>Choose MODIS Terra, MODIS Aqua, VIIRS Suomi NPP, or VIIRS NOAA-20, then choose a date in the timeline and select <strong>View</strong>. Coverage depends on the satellite and imagery available for that day; black or empty areas can be genuine gaps. The lighting controls follow the selected date.</p>
+ 
++          <h3>Gaia</h3>
++          <p>Gaia lists every image layer NASA GIBS offers, such as clouds, vegetation, fires, aerosols, ocean colour, snow and ice. Use the category chips or the search box to narrow the list, then select a layer to draw its live tiles over the globe. If a layer changes over time, the timeline appears: use the arrows, the day strip, or the date box to step through its observations. Layers differ in resolution and coverage, so empty areas can be genuine gaps.</p>
++
+           <h3>Stargaze</h3>
+           <p>Drag to look around the sky and select a star to identify it. Set the UTC date and time in <strong>Sky conditions</strong>, or choose <strong>Today</strong> to return to the current time. The light-pollution control changes the faintest visible stars.</p>
+         </section>
