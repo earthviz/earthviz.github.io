@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   GIBS_START_DATE,
+  GIBS_DAILY_SOURCES,
   HLS_L30_LAYER,
   HLS_S30_LAYER,
   clampDay,
@@ -30,8 +31,13 @@ test('timeline days clamp to the selected range', () => {
 test('GIBS tiles use the NASA Web Mercator daily imagery route', () => {
   assert.equal(
     gibsTileUrl('2024-06-15', 5, 9, 12),
-    'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/2024-06-15/GoogleMapsCompatible_Level9/5/12/9.jpg',
+    'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/2024-06-15/GoogleMapsCompatible_Level9/5/12/9.jpeg',
   );
+  assert.equal(
+    gibsTileUrl('2024-06-15', 5, 9, 12, 'viirs-noaa20'),
+    'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_NOAA20_CorrectedReflectance_TrueColor/default/2024-06-15/GoogleMapsCompatible_Level9/5/12/9.jpeg',
+  );
+  assert.equal(GIBS_DAILY_SOURCES['viirs-snpp'].startDate, '2015-11-24');
 });
 
 test('HLS tiles use NASA Level 12 Landsat and Sentinel routes', () => {

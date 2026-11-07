@@ -61,8 +61,21 @@
         <summary><span><strong>Tiles</strong><small>Imagery and loading</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
         <div class="panel-content">
           <label for="src">Tile source</label>
-          <select id="src"><option value="eox">Sentinel-2 · Natural color</option><option value="esri">Esri · World Imagery · non-commercial</option></select>
-          <p class="panel-note esri-use-note">Esri imagery is for interactive, non-commercial viewing only. No export, scraping, bulk download, or redistribution. <a href="https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9" target="_blank" rel="noopener">Layer terms ↗</a></p>
+          <select id="src">
+            <optgroup label="Sentinel-2 cloudless · EOX">
+              <option value="eox-2025" selected>2025 · latest</option><option value="eox-2024">2024</option><option value="eox-2023">2023</option><option value="eox-2022">2022</option><option value="eox-2021">2021</option><option value="eox-2020">2020</option><option value="eox-2019">2019</option><option value="eox-2018">2018</option>
+            </optgroup>
+            <optgroup label="NASA GIBS · static">
+              <option value="nasa-blue-marble">Blue Marble · shaded relief</option><option value="nasa-black-marble">Black Marble · night lights · 2016</option>
+            </optgroup>
+            <optgroup label="NASA GIBS · latest clouds">
+              <option value="nasa-goes-east">GOES-East · GeoColor</option><option value="nasa-goes-west">GOES-West · GeoColor</option><option value="nasa-himawari">Himawari · visible</option>
+            </optgroup>
+            <optgroup label="Other imagery">
+              <option value="esri">Esri · World Imagery · non-commercial</option>
+            </optgroup>
+          </select>
+          <p id="esri-use-note" class="panel-note esri-use-note" hidden>Esri imagery is for interactive, non-commercial viewing only. No export, scraping, bulk download, or redistribution. <a href="https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9" target="_blank" rel="noopener">Layer terms ↗</a></p>
           <label for="tile-priority">Tile loading priority</label>
           <select id="tile-priority" aria-describedby="tile-priority-note"><option value="adaptive" selected>Adaptive</option><option value="view-center">View center</option><option value="nearest">Nearest terrain</option></select>
           <p id="tile-priority-note" class="panel-note">Adaptive prioritizes nearby tiles while moving, then resolves the view center.</p>
@@ -127,6 +140,8 @@
       <div class="spacetime-head">
         <div><div class="eyebrow">NASA EARTH OBSERVATION</div><strong id="spacetime-label">Earth through time</strong></div>
         <div class="timeline-actions">
+          <label class="sr-only" for="spacetime-source">Daily imagery source</label>
+          <select id="spacetime-source" aria-label="Daily imagery source"><option value="modis-terra">MODIS Terra</option><option value="modis-aqua">MODIS Aqua</option><option value="viirs-snpp">VIIRS Suomi NPP</option><option value="viirs-noaa20">VIIRS NOAA-20</option></select>
           <button id="spacetime-prev" type="button" aria-label="Previous day" title="Previous day">←</button>
           <button id="spacetime-next" type="button" aria-label="Next day" title="Next day">→</button>
           <form id="spacetime-form" class="date-jump"><label class="sr-only" for="spacetime-date">Choose any date</label><input id="spacetime-date" type="date"><button id="spacetime-load" type="submit">View</button></form>

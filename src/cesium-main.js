@@ -36,8 +36,8 @@ import {
   usnoOneDayUrl,
 } from './solar-flow.js';
 import {
+  GIBS_DAILY_SOURCES,
   GIBS_NATIVE_MAX_ZOOM,
-  GIBS_START_DATE,
   clampDay,
   dayToIso,
   isoToDay,
@@ -45,7 +45,7 @@ import {
 } from './spacetime.js';
 import { apparentSolarAltitude, horizonDip, solarPhase } from './sky-model.js';
 import { TerrariumTerrainProvider } from './cesium/terrarium-terrain-provider.js';
-import { EXPLORE_IMAGERY, ImageryController } from './cesium/imagery.js';
+import { DEFAULT_EXPLORE_IMAGERY, EXPLORE_IMAGERY, ImageryController } from './cesium/imagery.js';
 import { OpenFreeMapOverlayController } from './cesium/openfreemap-overlay.js';
 import {
   installGlobeTilePriority,
@@ -353,13 +353,15 @@ function replaceTerrain() {
 }
 
 function setCredit() {
-  const key = mode === 'spacetime' ? 'gibs' : $('src').value;
-  const provider = key === 'gibs' ? 'NASA GIBS' : (key === 'eox' ? 'EOX' : 'Esri');
+  const key = $('src').value;
+  const definition = EXPLORE_IMAGERY[key] ?? EXPLORE_IMAGERY[DEFAULT_EXPLORE_IMAGERY];
+  const provider = mode === 'spacetime' ? 'NASA GIBS' : definition.provider;
   const showsOpenFreeMap = $('overlay-buildings').checked || $('overlay-roads').checked;
   $('credit-label').textContent = `© ${provider} · Mapzen · OSM${showsOpenFreeMap ? ' · OpenFreeMap' : ''} ↗`;
-  const imageryCredit = key === 'gibs'
-    ? 'NASA EOSDIS GIBS · MODIS Terra and HLS Landsat/Sentinel'
-    : (EXPLORE_IMAGERY[key] ?? EXPLORE_IMAGERY.eox).credit;
+  const daily = GIBS_DAILY_SOURCES[$('spacetime-source').value] ?? GIBS_DAILY_SOURCES['modis-terra'];
+  const imageryCredit = mode === 'spacetime'
+    ? `NASA EOSDIS GIBS · ${daily.label} and HLS Landsat/Sentinel detail`
+    : definition.credit;
   const credit = $('credit');
   const externalLink = (label, href) => {
     const link = document.createElement('a');
@@ -375,10 +377,11 @@ function setCredit() {
   }
   credit.append(' · Sun/Moon events: ', externalLink('USNO Astronomical Applications', 'https://aa.usno.navy.mil/data/api'), ' · Stars: Yale Bright Star Catalogue (BSC5) · Search: © OpenStreetMap contributors');
   $('esri-attribution').hidden = mode !== 'explore' || key !== 'esri';
+  $('esri-use-note').hidden = mode !== 'explore' || key !== 'esri';
 }
 
 function refreshImagery() {
-  if (mode === 'spacetime') imagery.showSpacetime(spacetimeDate);
+  if (mode === 'spacetime') imagery.showSpacetime(spacetimeDate, $('spacetime-source').value);
   else imagery.showExplore($('src').value);
   setCredit();
 }
@@ -739,8 +742,12 @@ canvas.addEventListener('wheel', event => {
 }, { passive: false });
 
 /* ---------- modes and controls ---------- */
-const firstGibsDay = isoToDay(GIBS_START_DATE);
 const lastGibsDay = isoToDay(previousUtcDate());
+
+function firstGibsDay() {
+  const source = GIBS_DAILY_SOURCES[$('spacetime-source').value] ?? GIBS_DAILY_SOURCES['modis-terra'];
+  return isoToDay(source.startDate);
+}
 
 function formatSpacetimeDate(value) {
   return new Date(`${value}T12:00:00Z`).toLocaleDateString(undefined, {
@@ -759,7 +766,7 @@ function renderSpacetimeDays() {
   const days = [];
   $('spacetime-days').replaceChildren();
   for (let offset = -15; offset <= 15; offset++) {
-    const day = clampDay(selectedDay + offset, firstGibsDay, lastGibsDay);
+    const day = clampDay(selectedDay + offset, firstGibsDay(), lastGibsDay);
     if (days.includes(day)) continue;
     days.push(day);
     const iso = dayToIso(day);
@@ -785,7 +792,7 @@ function renderSpacetimeDays() {
 }
 
 function setSpacetimeDate(value) {
-  const day = clampDay(isoToDay(value), firstGibsDay, lastGibsDay);
+  const day = clampDay(isoToDay(value), firstGibsDay(), lastGibsDay);
   if (!Number.isFinite(day)) return;
   const next = dayToIso(day);
   const changed = next !== spacetimeDate;
@@ -847,6 +854,13 @@ function setMode(nextMode) {
 }
 
 $('src').addEventListener('change', () => { if (mode !== 'spacetime') refreshImagery(); });
+$('spacetime-source').addEventListener('change', () => {
+  const minimum = GIBS_DAILY_SOURCES[$('spacetime-source').value].startDate;
+  $('spacetime-date').min = minimum;
+  const previousDate = spacetimeDate;
+  setSpacetimeDate(spacetimeDate);
+  if (mode === 'spacetime' && previousDate === spacetimeDate) refreshImagery();
+});
 for (const layer of ['buildings', 'roads']) {
   $(`overlay-${layer}`).addEventListener('change', () => {
     cityOverlay.setLayerEnabled(layer, $(`overlay-${layer}`).checked);
@@ -896,7 +910,7 @@ for (const id of ['jump-sunrise', 'jump-sunset']) $(id).addEventListener('click'
 $('mode-explore').onclick = () => setMode('explore');
 $('mode-spacetime').onclick = () => setMode('spacetime');
 $('mode-stargaze').onclick = () => setMode('stargaze');
-$('spacetime-date').min = GIBS_START_DATE;
+$('spacetime-date').min = GIBS_DAILY_SOURCES[$('spacetime-source').value].startDate;
 $('spacetime-date').max = dayToIso(lastGibsDay);
 $('spacetime-form').onsubmit = event => { event.preventDefault(); setSpacetimeDate($('spacetime-date').value); };
 $('spacetime-prev').onclick = () => setSpacetimeDate(dayToIso(isoToDay(spacetimeDate) - 1));
@@ -1014,7 +1028,7 @@ if (import.meta.env.DEV && new URLSearchParams(location.search).has('debug')) {
       maximumZoomDistance: cameraController.maximumZoomDistance,
       collisionDetection: cameraController.enableCollisionDetection,
     },
-    imagery: { mode, source: mode === 'spacetime' ? 'gibs' : $('src').value, date: mode === 'spacetime' ? spacetimeDate : null },
+    imagery: { mode, source: mode === 'spacetime' ? $('spacetime-source').value : $('src').value, date: mode === 'spacetime' ? spacetimeDate : null },
     cityOverlay: cityOverlay.stats(),
     camera: { height: cameraHeight(), heading: camera.heading, pitch: camera.pitch },
     focus: { latitude: focus.lat * R2D, longitude: focus.lng * R2D },

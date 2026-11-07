@@ -21,8 +21,8 @@ The app ships a restrictive Content Security Policy that permits requests only t
 
 ## Modes
 
-- **Explore**: terrain globe with Sentinel-2 cloudless (EOX) or Esri World Imagery.
-- **Spacetime**: daily NASA GIBS imagery, one explicitly loaded date at a time.
+- **Explore**: terrain globe with yearly Sentinel-2 cloudless imagery (EOX, 2018–2025), Esri World Imagery, NASA Blue/Black Marble, or latest GOES/Himawari cloud imagery.
+- **Spacetime**: daily NASA GIBS Terra, Aqua, Suomi NPP, or NOAA-20 imagery, one explicitly loaded date at a time.
 - **Stargaze**: look at the local night sky from the selected latitude and longitude.
 
 ### Controls
@@ -60,7 +60,7 @@ Source imagery is draped directly and Cesium's reflective water material is disa
 
 ### Spacetime
 
-Choose **Spacetime** to browse daily MODIS Terra imagery from NASA GIBS. There is no automatic playback. MODIS is used for global and regional views; local views switch to NASA's 30 m HLS Landsat-8/9 and Sentinel-2 layers through zoom 12, and deeper terrain tiles crop their matching HLS parent. Only imagery acquired on the selected date is shown: empty MODIS swaths and transparent HLS coverage stay black, and neighbouring dates or Explore imagery are never blended in. Changing dates keeps elevation samples and terrain geometry.
+Choose **Spacetime** to browse daily MODIS Terra, MODIS Aqua, VIIRS Suomi NPP, or VIIRS NOAA-20 imagery from NASA GIBS. There is no automatic playback. The selected daily mosaic is used for global and regional views; local views add NASA's 30 m HLS Landsat-8/9 and Sentinel-2 layers through zoom 12, and deeper terrain tiles crop their matching HLS parent. Only imagery acquired on the selected date is shown: empty swaths and transparent HLS coverage stay black, and neighbouring dates or Explore imagery are never blended in. Changing dates or daily sources keeps elevation samples and terrain geometry.
 
 Lighting follows the selected imagery date. The UTC time slider moves through that date's night, civil twilight, sunrise, daylight, sunset, and evening twilight using the Sun's position at the current coordinates.
 
@@ -77,7 +77,7 @@ Cesium draws the Sun, atmosphere, dynamic Sun lighting, and the globe-view Moon 
 ## Data sources
 
 - Elevation: Mapzen Terrarium tiles hosted by AWS
-- Imagery: Sentinel-2 cloudless by EOX, Esri World Imagery, or daily MODIS Terra and HLS from NASA EOSDIS GIBS
+- Imagery: yearly Sentinel-2 cloudless by EOX; Esri World Imagery; Blue Marble, Black Marble, latest GOES/Himawari, or daily MODIS/VIIRS and HLS from NASA EOSDIS GIBS
 - Buildings and roads: OpenFreeMap vector tiles, © OpenMapTiles, data © OpenStreetMap contributors
 - Stars: Yale Bright Star Catalogue, 5th edition (`bsc5.json`)
 - Sun and Moon daily events: U.S. Naval Observatory Astronomical Applications API, with an offline solar fallback

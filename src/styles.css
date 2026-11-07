@@ -105,7 +105,7 @@ details[open] .chevron { transform: rotate(180deg); }
 .panel-content { display: flex; max-height: calc(100dvh - 270px); flex-direction: column; gap: 9px; overflow: auto; padding: 5px 15px 16px 53px; border-top: 1px solid rgba(220, 235, 230, .07); scrollbar-color: var(--border-strong) transparent; scrollbar-width: thin; }
 .panel-content > .eyebrow { margin: 7px 0 1px; }
 .panel-content label { color: #c7d0ce; font-size: 10px; }
-.panel-content select, #sky-date, .spacetime input[type="date"] { width: 100%; min-width: 0; height: 34px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; background: #182125; color: var(--text); font-size: 10px; }
+.panel-content select, #sky-date, .spacetime input[type="date"], .spacetime select { width: 100%; min-width: 0; height: 34px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; background: #182125; color: var(--text); font-size: 10px; }
 .explore-imagery, .lighting-section { display: flex; flex-direction: column; gap: 8px; }
 .spacetime-mode .explore-imagery, .spacetime-mode .live-time-control { display: none; }
 .field-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
@@ -294,6 +294,7 @@ input[type="range"] { width: 100%; height: 16px; margin: 0; cursor: pointer; acc
 .spacetime-head > div:first-child { min-width: 150px; }
 .spacetime-head strong { font-size: 12px; }
 .timeline-actions { display: flex; align-items: center; gap: 5px; }
+#spacetime-source { width: 142px; height: 31px; }
 .timeline-actions > button, .date-jump button { display: grid; min-width: 31px; height: 31px; place-content: center; padding: 0 9px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-soft); color: var(--text-soft); font-size: 10px; }
 .timeline-actions > button:hover, .date-jump button:hover { border-color: var(--border-strong); color: var(--text); }
 .date-jump { display: flex; align-items: center; gap: 5px; }
@@ -330,6 +331,7 @@ input[type="range"] { width: 100%; height: 16px; margin: 0; cursor: pointer; acc
   .spacetime-head > div:first-child { min-width: 0; }
   .spacetime-head .eyebrow { display: none; }
   .timeline-actions { flex-wrap: wrap; justify-content: flex-end; }
+  #spacetime-source { width: 132px; }
   .date-jump input[type="date"] { width: 118px; }
   .spacetime.minimized { width: calc(100vw - 20px); }
   .stargaze-mode .stargaze-info { top: calc(var(--topbar-height) + 10px); right: 56px; width: min(280px, calc(100vw - 68px)); max-height: calc(100dvh - var(--topbar-height) - 20px); }
