@@ -1159,6 +1159,23 @@ async function loadGaiaCatalog() {
   }
 }
 
+function syncGaiaLegend() {
+  const legend = $('gaia-legend');
+  const layer = mode === 'gaia' ? gaiaLayer : null;
+  legend.hidden = !layer;
+  if (!layer) return;
+  const img = $('gaia-legend-img');
+  $('gaia-legend-title').textContent = layer.title;
+  const noLegend = () => {
+    img.hidden = true;
+    $('gaia-legend-note').textContent = 'NASA publishes no colour scale for this layer. It is imagery, so colours are as observed (or see NASA Worldview for details).';
+  };
+  img.hidden = !layer.legend;
+  $('gaia-legend-note').textContent = layer.legend ? 'Scale published by NASA GIBS for this layer.' : '';
+  img.onerror = noLegend;
+  if (layer.legend) img.src = layer.legend; else noLegend();
+}
+
 function renderGaiaFeatured() {
   const picks = featuredLayers(gaiaCatalog);
   $('gaia-featured').hidden = !picks.length;
@@ -1225,6 +1242,7 @@ function selectGaiaLayer(layer) {
   gaiaTime = layer.defaultTime ?? 0;
   $('spacetime').hidden = !gaiaTimed();
   syncGaiaTimeline();
+  syncGaiaLegend();
   renderGaiaFeatured();
   renderGaiaList();
   refreshImagery();
@@ -1336,6 +1354,7 @@ function setMode(nextMode) {
   document.body.classList.toggle('explore-mode', mode === 'explore');
   document.body.classList.toggle('gaia-mode', mode === 'gaia');
   if (mode === 'gaia') loadGaiaCatalog();
+  syncGaiaLegend();
   $('spacetime').hidden = !(isSpacetime || gaiaTimed());
   syncGaiaTimeline();
   for (const candidate of ['explore', 'spacetime', 'gaia', 'stargaze']) {

@@ -82,6 +82,15 @@ export function matchesCategory(layer, name) {
 const kids = (el, name) => [...el.getElementsByTagNameNS('*', name)];
 const text = (el, name) => kids(el, name)[0]?.textContent.trim() ?? '';
 
+// Colour legend published by GIBS for the layer's default style, if any.
+function legendUrl(el) {
+  for (const node of kids(el, 'LegendURL')) {
+    const href = node.getAttributeNS('http://www.w3.org/1999/xlink', 'href') || node.getAttribute('xlink:href') || '';
+    if (href.startsWith('https://gibs.earthdata.nasa.gov/')) return href;
+  }
+  return null;
+}
+
 export function parseCapabilities(xml) {
   const doc = new DOMParser().parseFromString(xml, 'application/xml');
   const layers = [];
@@ -98,7 +107,7 @@ export function parseCapabilities(xml) {
     const [east, north] = text(el, 'UpperCorner').split(/\s+/).map(Number);
     const bbox = [west, south, east, north].every(Number.isFinite) ? { west, south, east, north } : null;
     layers.push({
-      id, format, tileMatrixSet: tms, bbox,
+      id, format, tileMatrixSet: tms, bbox, legend: legendUrl(el),
       title: kids(el, 'Title').find(t => t.parentNode === el)?.textContent.trim() || id,
       maxLevel: +tms.match(/\d+$/)[0],
       periods,

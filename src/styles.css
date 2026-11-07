@@ -434,3 +434,10 @@ body.flying .explore-controls > .flight-panel { display: block; }
 #gaia-featured-list { display: block; margin-top: 0; }
 .gaia-featured-group + .gaia-featured-list { margin-top: 0; }
 .gaia-catalog input[type="search"] { width: 100%; height: 34px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; background: #182125; color: var(--text); font-size: 11px; }
+.gaia-legend { position: fixed; z-index: 12; left: 50%; bottom: 168px; transform: translateX(-50%); display: none; max-width: min(440px, 40vw); padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); box-shadow: 0 10px 28px rgba(0, 0, 0, .25); backdrop-filter: blur(18px); }
+.gaia-mode .gaia-legend:not([hidden]) { display: block; }
+.ui-minimal .gaia-legend { display: none !important; }
+.gaia-legend strong { display: block; margin: 3px 0 6px; font-size: 11px; font-weight: 620; }
+.gaia-legend img { display: block; max-width: 100%; max-height: 90px; padding: 6px 8px; border-radius: 4px; background: #f3f5f6; }
+.gaia-legend p { margin: 4px 0 0; color: var(--text-faint); font-size: 9px; line-height: 1.4; }
+@media (max-width: 680px) { .gaia-legend { bottom: 330px; max-width: calc(100vw - 20px); } }
