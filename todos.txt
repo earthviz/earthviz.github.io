@@ -1,0 +1,25 @@
+• Drag-and-Drop Vector Data Loader
+	• Action: Build a client-side file handler capable of parsing local .geojson, .kml, and .czml files directly into the Cesium viewer.
+	• Purpose: Transforms Earthviz into a secure sandbox where users can overlay custom spatial tracks over historical satellite data.
+• Linear & Area Analytical Tools
+	• Action: Set up lightweight canvas mouse hooks using Cesium’s mathematical utilities to calculate point-to-point distances and area tracking metrics.
+	• Purpose: Allows users to actively quantify environmental degradation or storm layouts during data capture sessions.
+• Alpha/Opacity Blending System
+	• Action: Implement UI sliders across all active layer tabs to let users dynamically control transparency levels.
+	• Purpose: Permits simultaneous stacking of environmental metrics (like weather/population data) clean over underlying optical layers.
+
+2. Infrastructure & Human Geography (The "People Layer")
+
+• OpenFreeMap Vector Administrative Grid
+	• Action: Extract and overlay transparent place-labels and political boundaries using a keyless vector tile provider.
+	• Purpose: Keeps navigation clear when diving beneath cloud-free satellite layers.
+• NASA SEDAC Population Density Layer
+	• Action: Add a keyless, global Gridded Population of the World (GPW) heat-map overlay.
+	• Purpose: Visually links physical geography limits to global urbanization clusters.
+• Wikidata Context Anchors
+	• Action: Add a bounding-box camera listener (viewer.camera.moveEnd) that pulls nearby structural points of interest from the Wikidata SPARQL API.
+	• Purpose: Drops dynamic, clickable context pins on the 3D terrain highlighting city profiles and landmarks as you fly by.
+
+3. Core GIS Functionality Widgets
+
+1. The Best Keyless API: Element 84 Earth Search (STAC API)

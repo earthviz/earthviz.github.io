@@ -39,3 +39,24 @@ test('category chips match by id/title', () => {
   assert.ok(!matchesCategory({ id: 'BlueMarble', title: 'Blue Marble' }, 'Fires'));
   assert.ok(matchesCategory({ id: 'x', title: 'y' }, ''));
 });
+
+import { featuredLayers } from '../src/gibs-catalog.js';
+test('featured layers resolve against the catalog in order and skip missing ids', () => {
+  const a = { id: 'A' }; const c = { id: 'C' };
+  const picks = featuredLayers([c, a], [{ id: 'A', label: 'a' }, { id: 'B', label: 'b' }, { id: 'C', label: 'c' }]);
+  assert.deepEqual(picks.map(p => p.label), ['a', 'c']);
+  assert.equal(picks[0].layer, a);
+});
+
+import { cadenceLabel, coverageLabel } from '../src/gibs-catalog.js';
+test('cadence and coverage labels', () => {
+  assert.equal(cadenceLabel([]), 'Static');
+  assert.equal(cadenceLabel([{ months: 0, ms: 600000 }]), 'Every 10 min');
+  assert.equal(cadenceLabel([{ months: 0, ms: 86400000 }]), 'Daily');
+  assert.equal(cadenceLabel([{ months: 0, ms: 8 * 86400000 }]), 'Every 8 days');
+  assert.equal(cadenceLabel([{ months: 1, ms: 0 }]), 'Monthly');
+  assert.equal(coverageLabel({ id: 'MODIS_X', bbox: { west: -180, south: -90, east: 180, north: 90 } }), 'Global');
+  assert.equal(coverageLabel({ id: 'Some_Regional', bbox: { west: -20, south: 30, east: 40, north: 70 } }), 'Regional');
+  assert.equal(coverageLabel({ id: 'GOES-East_ABI_GeoColor', bbox: { west: -180, south: -90, east: 180, north: 90 } }), 'Regional · Americas');
+  assert.equal(coverageLabel({ id: 'X', bbox: null }), 'Coverage unknown');
+});

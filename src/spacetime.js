@@ -2,6 +2,12 @@ export const GIBS_START_DATE = '2000-02-24';
 export const GIBS_LAYER = 'MODIS_Terra_CorrectedReflectance_TrueColor';
 export const GIBS_NATIVE_MAX_ZOOM = 9;
 export const GIBS_DAILY_SOURCES = {
+  'multi-sensor': {
+    kind: 'composite',
+    layer: GIBS_LAYER,
+    label: 'All polar sensors · gap-filled',
+    startDate: GIBS_START_DATE,
+  },
   'modis-terra': {
     layer: GIBS_LAYER,
     label: 'MODIS Terra · True color',
@@ -21,6 +27,24 @@ export const GIBS_DAILY_SOURCES = {
     layer: 'VIIRS_NOAA20_CorrectedReflectance_TrueColor',
     label: 'VIIRS NOAA-20 · True color',
     startDate: '2018-01-05',
+  },
+  'viirs-noaa21': {
+    layer: 'VIIRS_NOAA21_CorrectedReflectance_TrueColor',
+    label: 'VIIRS NOAA-21 · True color',
+    startDate: '2023-03-01',
+  },
+  // Non-GIBS sources. MODIS Terra supplies the low-zoom base for Sentinel-2.
+  'sentinel2-e84': {
+    kind: 'sentinel2',
+    layer: GIBS_LAYER,
+    label: 'Sentinel-2 L2A · Element 84 Earth Search (10 m, latest scene within 10 days)',
+    startDate: '2017-01-01',
+  },
+  'landsat-gls': {
+    kind: 'gls',
+    layer: GIBS_LAYER,
+    label: 'Landsat Global Land Survey epochs (1975 · 1990 · 2000 · 2005 · 2010)',
+    startDate: '1972-07-25',
   },
 };
 export const HLS_NATIVE_MAX_ZOOM = 12;

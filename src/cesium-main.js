@@ -61,8 +61,16 @@ import {
 } from './flight.js';
 import { TerrariumTerrainProvider } from './cesium/terrarium-terrain-provider.js';
 import { TERRAIN_SOURCES } from './cesium/terrarium.js';
-import { GIBS_CATEGORIES, fetchGibsCatalog, formatGibsTime, matchesCategory, snapTime, stepTime } from './gibs-catalog.js';
+import { GIBS_CATEGORIES, featuredLayers, layerMeta, fetchGibsCatalog, formatGibsTime, matchesCategory, snapTime, stepTime } from './gibs-catalog.js';
 import { DEFAULT_EXPLORE_IMAGERY, EXPLORE_IMAGERY, ImageryController } from './cesium/imagery.js';
+import { OverlayController } from './cesium/overlays.js';
+import {
+  E84_SEARCH_URL,
+  S2_MAX_VIEW_DEGREES,
+  glsEpochForDate,
+  pickScenes,
+  stacSearchBody,
+} from './sources.js';
 import { OpenFreeMapOverlayController } from './cesium/openfreemap-overlay.js';
 import {
   installGlobeTilePriority,
@@ -149,6 +157,18 @@ const widget = new CesiumWidget(globeContainer, {
 const { scene, camera, canvas } = widget;
 const globe = scene.globe;
 const imagery = new ImageryController(globe);
+const overlays = new OverlayController({
+  onChange: () => { if (mode === 'gaia') refreshImagery(); },
+  onStatus: text => { $('gaia-radar-status').textContent = text; },
+  onFrame: (index, frames) => {
+    const slider = $('gaia-radar-frame');
+    if (!frames.length) return;
+    slider.max = String(frames.length - 1);
+    slider.value = String(index);
+    const minutes = Math.round((frames.at(-1).time - frames[index].time) / 60000);
+    $('gaia-radar-time').textContent = `${new Date(frames[index].time).toISOString().slice(11, 16)} UTC${minutes ? ` · −${minutes} min` : ' · latest'}`;
+  },
+});
 const cityOverlay = new OpenFreeMapOverlayController({
   scene,
   globe,
@@ -618,9 +638,15 @@ function setCredit() {
   $('credit-label').textContent = `© ${provider} · ${$('terrain-source').value === 'mapterhorn' ? 'Mapterhorn' : 'Mapzen'} · OSM${showsOpenFreeMap ? ' · OpenFreeMap' : ''} ↗`;
   const daily = GIBS_DAILY_SOURCES[$('spacetime-source').value] ?? GIBS_DAILY_SOURCES['modis-terra'];
   const imageryCredit = mode === 'gaia'
-    ? `NASA EOSDIS GIBS · ${gaiaLayer?.title ?? 'Blue Marble'}`
+    ? [`NASA EOSDIS GIBS · ${gaiaLayer?.title ?? 'Blue Marble'}`, ...overlays.credits].join(' · ')
     : mode === 'spacetime'
-      ? `NASA EOSDIS GIBS · ${daily.label} and HLS Landsat/Sentinel detail`
+      ? (daily.kind === 'gls'
+        ? `Landsat Global Land Survey ${glsEpochForDate(spacetimeDate)} · USGS/NASA via Esri · NASA GIBS Blue Marble`
+        : daily.kind === 'composite'
+          ? 'NASA EOSDIS GIBS · MODIS Terra/Aqua + VIIRS SNPP/NOAA-20/NOAA-21 true color (gap-filled) and HLS Landsat/Sentinel detail'
+          : daily.kind === 'sentinel2'
+          ? 'Sentinel-2 L2A via Element 84 Earth Search (contains modified Copernicus Sentinel data) · NASA GIBS MODIS base'
+          : `NASA EOSDIS GIBS · ${daily.label} and HLS Landsat/Sentinel detail`)
       : definition.credit;
   const credit = $('credit');
   const externalLink = (label, href) => {
@@ -644,11 +670,56 @@ function setCredit() {
 }
 
 function refreshImagery() {
-  if (mode === 'gaia') imagery.showGaia(gaiaLayer, gaiaTime);
-  else if (mode === 'spacetime') imagery.showSpacetime(spacetimeDate, $('spacetime-source').value);
-  else imagery.showExplore($('src').value);
+  if (mode === 'gaia') imagery.showGaia(gaiaLayer, gaiaTime, overlays.layers());
+  else if (mode === 'spacetime') {
+    imagery.showSpacetime(spacetimeDate, $('spacetime-source').value);
+    loadSentinelScenes();
+  } else imagery.showExplore($('src').value);
   setCredit();
 }
+
+/* ---------- Spacetime: Sentinel-2 scenes from Element 84 Earth Search ---------- */
+let sentinelController = null;
+let sentinelTimer = 0;
+
+function viewDegrees() {
+  const rect = camera.computeViewRectangle(globe.ellipsoid);
+  if (!rect) return null;
+  const d = value => value * 180 / Math.PI;
+  const box = { west: d(rect.west), south: d(rect.south), east: d(rect.east), north: d(rect.north) };
+  return box.west <= box.east && box.east - box.west <= S2_MAX_VIEW_DEGREES && box.north - box.south <= S2_MAX_VIEW_DEGREES ? box : null;
+}
+
+function loadSentinelScenes() {
+  clearTimeout(sentinelTimer);
+  sentinelController?.abort();
+  const wanted = mode === 'spacetime' && GIBS_DAILY_SOURCES[$('spacetime-source').value]?.kind === 'sentinel2';
+  $('spacetime-source-status').hidden = true;
+  if (!wanted) return;
+  sentinelTimer = setTimeout(async () => {
+    const box = viewDegrees();
+    const status = $('spacetime-source-status');
+    if (!box) { status.textContent = 'Zoom in to load 10 m Sentinel-2 scenes'; status.hidden = false; return; }
+    sentinelController = new AbortController();
+    const { signal } = sentinelController;
+    status.textContent = 'Searching Sentinel-2 scenes…';
+    status.hidden = false;
+    try {
+      const response = await privacyFetch(E84_SEARCH_URL, {
+        method: 'POST', signal,
+        headers: { 'Content-Type': 'application/json', Accept: 'application/geo+json' },
+        body: JSON.stringify(stacSearchBody(box, spacetimeDate)),
+      });
+      const result = await readJson(response, 8_000_000);
+      const scenes = pickScenes(result.features);
+      imagery.setSentinelScenes(scenes);
+      status.textContent = scenes.length ? `${scenes.length} Sentinel-2 scenes · newest ${scenes[0].datetime.slice(0, 10)}` : 'No Sentinel-2 scenes in the last 10 days here';
+    } catch (error) {
+      if (error.name !== 'AbortError') status.textContent = 'Sentinel-2 search unavailable right now';
+    }
+  }, 600);
+}
+camera.moveEnd.addEventListener(loadSentinelScenes);
 
 /* ---------- time, lighting, and daily events ---------- */
 const riseSetCache = new Map();
@@ -1080,11 +1151,47 @@ async function loadGaiaCatalog() {
   try {
     gaiaCatalog = await fetchGibsCatalog(privacyFetch);
     $('gaia-count').textContent = `${gaiaCatalog.length} NASA GIBS layers`;
+    renderGaiaFeatured();
     renderGaiaList();
   } catch {
     gaiaCatalog = null;
     $('gaia-count').textContent = 'Catalog unavailable — reopen Gaia to retry';
   }
+}
+
+function renderGaiaFeatured() {
+  const picks = featuredLayers(gaiaCatalog);
+  $('gaia-featured').hidden = !picks.length;
+  const nodes = [];
+  let group = '';
+  for (const { group: g, label, hint, layer } of picks) {
+    if (g && g !== group) {
+      group = g;
+      const heading = document.createElement('div');
+      heading.className = 'gaia-featured-group';
+      heading.textContent = g;
+      const grid = document.createElement('div');
+      grid.className = 'gaia-featured-list';
+      grid.dataset.group = g;
+      nodes.push(heading, grid);
+    }
+    const grid = nodes.at(-1);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'gaia-feature';
+    button.setAttribute('aria-selected', String(layer === gaiaLayer));
+    const title = document.createElement('strong');
+    const note = document.createElement('small');
+    const meta = document.createElement('small');
+    meta.className = 'gaia-feature-meta';
+    title.textContent = label;
+    note.textContent = hint;
+    meta.textContent = layerMeta(layer);
+    button.append(title, note, meta);
+    button.onclick = () => selectGaiaLayer(layer);
+    grid.append(button);
+  }
+  $('gaia-featured-list').replaceChildren(...nodes);
 }
 
 function renderGaiaList() {
@@ -1099,7 +1206,8 @@ function renderGaiaList() {
     const title = document.createElement('strong');
     title.textContent = layer.title;
     const meta = document.createElement('small');
-    meta.textContent = layer.periods.length ? `◷ ${layer.id}` : layer.id;
+    meta.textContent = layerMeta(layer);
+    row.title = layer.id;
     row.append(title, meta);
     row.onclick = () => selectGaiaLayer(layer);
     return row;
@@ -1117,6 +1225,7 @@ function selectGaiaLayer(layer) {
   gaiaTime = layer.defaultTime ?? 0;
   $('spacetime').hidden = !gaiaTimed();
   syncGaiaTimeline();
+  renderGaiaFeatured();
   renderGaiaList();
   refreshImagery();
 }
@@ -1164,6 +1273,18 @@ function syncGaiaTimeline() {
 }
 
 $('gaia-search').addEventListener('input', renderGaiaList);
+$('gaia-hypso').addEventListener('change', () => overlays.setHypso($('gaia-hypso').value));
+$('gaia-hypso-alpha').addEventListener('input', () => overlays.setHypsoAlpha($('gaia-hypso-alpha').value / 100));
+$('gaia-radar').addEventListener('change', async () => {
+  await overlays.setRadar($('gaia-radar').checked);
+  $('gaia-radar').checked = overlays.radar;
+  $('gaia-radar-scrub').hidden = !overlays.radar;
+});
+$('gaia-radar-animate').addEventListener('change', () => overlays.setAnimate($('gaia-radar-animate').checked));
+$('gaia-radar-frame').addEventListener('input', () => {
+  overlays.scrub(Number($('gaia-radar-frame').value));
+  $('gaia-radar-animate').checked = false;
+});
 $('gaia-chips').replaceChildren(...['', ...GIBS_CATEGORIES.map(([label]) => label)].map(label => {
   const chip = document.createElement('button');
   chip.type = 'button';
@@ -1189,6 +1310,7 @@ function setMode(nextMode) {
   const isStargazing = mode === 'stargaze';
   if (isSpacetime) {
     $('sky-date').value = spacetimeDate;
+    syncSpacetimeDate(); // replaces any Gaia layer label/day strip left in the timeline
     updateSun();
   } else if (previousMode === 'spacetime' && nonSpacetimeObservationDay) {
     $('sky-date').value = nonSpacetimeObservationDay;
@@ -1473,3 +1595,52 @@ updateEnvironment();
 scheduleDailyEvents(true);
 loadStarCatalog();
 requestAnimationFrame(animate);
+
+/* ---------- Gaia layout: resizable catalog + hide-panels toggle ---------- */
+{
+  const handle = $('catalog-resize');
+  const panel = $('gaia-catalog');
+  const MIN = 280;
+  const maxWidth = () => Math.max(MIN, Math.min(720, window.innerWidth * 0.55));
+  const apply = width => {
+    const next = Math.round(Math.max(MIN, Math.min(maxWidth(), width)));
+    document.documentElement.style.setProperty('--catalog-width', `${next}px`);
+    handle.setAttribute('aria-valuenow', String(next));
+    return next;
+  };
+  const stored = () => { try { return Number(localStorage.getItem('earthviz.catalogWidth')); } catch { return 0; } };
+  const save = width => { try { localStorage.setItem('earthviz.catalogWidth', String(width)); } catch { /* private mode */ } };
+  if (stored()) apply(stored());
+  handle.setAttribute('aria-valuemin', String(MIN));
+  const current = () => panel.getBoundingClientRect().width || 320;
+  handle.addEventListener('pointerdown', event => {
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    const startX = event.clientX;
+    const startWidth = current();
+    // The panel is anchored on the right, so dragging left makes it wider.
+    const move = e => apply(startWidth + startX - e.clientX);
+    const end = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', end);
+      handle.removeEventListener('pointercancel', end);
+      save(current());
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  });
+  handle.addEventListener('keydown', event => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    save(apply(current() + (event.key === 'ArrowLeft' ? 24 : -24)));
+  });
+  handle.addEventListener('dblclick', () => { document.documentElement.style.removeProperty('--catalog-width'); save(320); });
+  window.addEventListener('resize', () => { if (stored()) apply(stored()); });
+
+  $('gaia-panels-toggle').addEventListener('click', () => {
+    const hidden = document.body.classList.toggle('gaia-panels-hidden');
+    $('gaia-panels-toggle').setAttribute('aria-pressed', String(hidden));
+    $('gaia-panels-toggle-text').textContent = hidden ? 'Show panels' : 'Hide panels';
+  });
+}

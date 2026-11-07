@@ -1,4 +1,4 @@
-import { Color } from '@cesium/core';
+import { Color, Rectangle } from '@cesium/core';
 import {
   ImageryLayer,
   UrlTemplateImageryProvider,
@@ -12,6 +12,7 @@ import {
   HLS_S30_LAYER,
 } from '../spacetime.js';
 import { gaiaTileUrl } from '../gibs-catalog.js';
+import { GLS_MAX_ZOOM, glsEpochForDate, glsTileUrl, titilerTileUrl } from '../sources.js';
 
 export const EXPLORE_IMAGERY = {
   esri: {
@@ -63,6 +64,7 @@ export const EXPLORE_IMAGERY = {
   },
 };
 
+const COMPOSITE_ORDER = ['modis-aqua', 'modis-terra', 'viirs-noaa21', 'viirs-noaa20', 'viirs-snpp'];
 export const DEFAULT_EXPLORE_IMAGERY = 'eox-2025';
 
 function templateProvider({ url, maximumLevel, credit, hasAlphaChannel = false }) {
@@ -87,15 +89,35 @@ function gibsUrl(layer, date, matrix, extension) {
 
 export function createSpacetimeLayers(date, source = 'modis-terra') {
   const daily = GIBS_DAILY_SOURCES[source] ?? GIBS_DAILY_SOURCES['modis-terra'];
+  if (daily.kind === 'gls') {
+    const epoch = glsEpochForDate(date);
+    return [
+      ...createExploreLayers('nasa-blue-marble'),
+      new ImageryLayer(templateProvider({
+        url: glsTileUrl(epoch),
+        maximumLevel: GLS_MAX_ZOOM,
+        credit: `Landsat Global Land Survey ${epoch} · USGS/NASA via Esri Landsat service`,
+        hasAlphaChannel: true,
+      }), { maximumAnisotropy: 8 }),
+    ];
+  }
   const credit = `Daily imagery: NASA EOSDIS GIBS · ${daily.label}`;
-  const modis = new ImageryLayer(templateProvider({
-    url: gibsUrl(daily.layer, date, 'GoogleMapsCompatible_Level9', 'jpeg'),
+  const dailyLayer = (definition, transparentGaps) => new ImageryLayer(templateProvider({
+    url: gibsUrl(definition.layer, date, 'GoogleMapsCompatible_Level9', 'jpeg'),
     maximumLevel: GIBS_NATIVE_MAX_ZOOM,
     credit,
   }), {
     maximumTerrainLevel: GIBS_NATIVE_MAX_ZOOM,
     maximumAnisotropy: 8,
+    // GIBS true-colour JPEGs have no alpha: orbit gaps are solid black.
+    ...(transparentGaps ? { colorToAlpha: Color.BLACK, colorToAlphaThreshold: 0.04 } : {}),
   });
+  // Several polar sensors pass at different times, so each fills the others'
+  // swath gaps. Bottom layer stays opaque; those above punch out black gaps.
+  const base = daily.kind === 'composite' || daily.kind === 'sentinel2'
+    ? COMPOSITE_ORDER.map(key => GIBS_DAILY_SOURCES[key]).filter(d => d.startDate <= date)
+        .map((d, i) => dailyLayer(d, i > 0))
+    : [dailyLayer(daily, false)];
   const hlsOptions = {
     maximumLevel: HLS_NATIVE_MAX_ZOOM,
     credit,
@@ -115,7 +137,19 @@ export function createSpacetimeLayers(date, source = 'modis-terra') {
     minimumTerrainLevel: GIBS_NATIVE_MAX_ZOOM + 1,
     maximumAnisotropy: 8,
   });
-  return [modis, landsat, sentinel];
+  return [...base, landsat, sentinel];
+}
+
+export function createSentinelLayers(scenes) {
+  return scenes.map(scene => new ImageryLayer(new UrlTemplateImageryProvider({
+    url: titilerTileUrl(scene.href),
+    maximumLevel: 14,
+    hasAlphaChannel: true,
+    rectangle: Rectangle.fromDegrees(scene.rectangle.west, scene.rectangle.south, scene.rectangle.east, scene.rectangle.north),
+    credit: `Sentinel-2 L2A ${scene.datetime.slice(0, 10)} · contains modified Copernicus Sentinel data · Element 84 Earth Search`,
+    enablePickFeatures: false,
+    tilingScheme: new WebMercatorTilingScheme(),
+  }), { minimumTerrainLevel: 8, maximumAnisotropy: 8 }));
 }
 
 export function createGaiaLayers(layer, time) {
@@ -138,6 +172,7 @@ export class ImageryController {
 
   replace(layers) {
     this.globe.imageryLayers.removeAll(true);
+    this.sentinel = [];
     this.layers = layers;
     for (const layer of layers) this.globe.imageryLayers.add(layer);
   }
@@ -146,8 +181,15 @@ export class ImageryController {
     this.replace(createExploreLayers(source));
   }
 
-  showGaia(layer, time) {
-    this.replace(layer ? createGaiaLayers(layer, time) : createExploreLayers('nasa-blue-marble'));
+  showGaia(layer, time, overlays = []) {
+    this.replace([...(layer ? createGaiaLayers(layer, time) : createExploreLayers('nasa-blue-marble')), ...overlays]);
+  }
+
+  // Sentinel-2 scenes arrive asynchronously, after the base layers are shown.
+  setSentinelScenes(scenes) {
+    for (const layer of this.sentinel ?? []) this.globe.imageryLayers.remove(layer, true);
+    this.sentinel = createSentinelLayers(scenes);
+    for (const layer of this.sentinel) this.globe.imageryLayers.add(layer);
   }
 
   showSpacetime(date, source) {

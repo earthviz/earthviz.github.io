@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="referrer" content="no-referrer">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com https://tiles.mapterhorn.com; connect-src 'self' https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com https://tiles.mapterhorn.com https://tiles.openfreemap.org https://aa.usno.navy.mil https://nominatim.openstreetmap.org https://geocoding-api.open-meteo.com; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; frame-src 'none'; form-action 'self'; upgrade-insecure-requests; block-all-mixed-content">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com https://tiles.mapterhorn.com https://tilecache.rainviewer.com https://wms.gebco.net https://ows.terrestris.de https://titiler.xyz https://landsat.arcgis.com; connect-src 'self' https://server.arcgisonline.com https://tiles.maps.eox.at https://gibs.earthdata.nasa.gov https://s3.amazonaws.com https://tiles.mapterhorn.com https://tiles.openfreemap.org https://aa.usno.navy.mil https://nominatim.openstreetmap.org https://geocoding-api.open-meteo.com https://tilecache.rainviewer.com https://wms.gebco.net https://ows.terrestris.de https://titiler.xyz https://landsat.arcgis.com https://api.rainviewer.com https://earth-search.aws.element84.com; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; frame-src 'none'; form-action 'self'; upgrade-insecure-requests; block-all-mixed-content">
     <meta name="theme-color" content="#10191c">
     <meta name="description" content="Explore Earth for free in an interactive 3D globe with satellite imagery, terrain, historical NASA views, and stargazing. No login or account required.">
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
@@ -75,12 +75,26 @@
         </div>
       </details>
       <details class="tool-panel gaia-browser" id="gaia-browser" open>
-        <summary><span><strong>Gaia</strong><small id="gaia-count">NASA GIBS layers</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
+        <summary><span><strong>Gaia · start here</strong><small id="gaia-count">NASA GIBS layers</small></span><span class="chevron" aria-hidden="true">⌄</span></summary>
         <div class="panel-content">
-          <label class="sr-only" for="gaia-search">Search NASA GIBS layers</label>
-          <input id="gaia-search" type="search" placeholder="Search layers (clouds, NDVI, fires…)" autocomplete="off" spellcheck="false">
-          <div id="gaia-chips" class="gaia-chips" role="group" aria-label="Layer categories"></div>
-          <div id="gaia-list" class="gaia-list" role="listbox" aria-label="NASA GIBS layers"></div>
+          <div id="gaia-featured" class="gaia-featured" role="group" aria-label="Featured layers" hidden>
+            <div class="eyebrow">Start here</div>
+            <div id="gaia-featured-list" class="gaia-featured-list"></div>
+          </div>
+          <div class="gaia-overlays" role="group" aria-label="Scientific overlays">
+            <div class="eyebrow">Overlays</div>
+            <div class="field-label"><label for="gaia-hypso">Hypsometric tint</label></div>
+            <select id="gaia-hypso" aria-describedby="gaia-overlay-note"><option value="off">Off</option><option value="gebco">GEBCO · land + ocean depth</option><option value="topo">TOPO-WMS · land elevation</option></select>
+            <div class="field-label"><label for="gaia-hypso-alpha">Tint opacity</label></div>
+            <input id="gaia-hypso-alpha" type="range" min="10" max="100" step="5" value="60">
+            <label class="switch-row" for="gaia-radar">Live radar (global)<input id="gaia-radar" type="checkbox" role="switch"></label>
+            <label class="switch-row" for="gaia-radar-animate">Animate last 2 h<input id="gaia-radar-animate" type="checkbox" role="switch" checked></label>
+            <div id="gaia-radar-scrub" hidden>
+              <div class="field-label"><label for="gaia-radar-frame">Radar frame</label><output id="gaia-radar-time" for="gaia-radar-frame"></output></div>
+              <input id="gaia-radar-frame" type="range" min="0" max="11" step="1" value="11">
+            </div>
+            <p id="gaia-overlay-note" class="panel-note"><span id="gaia-radar-status">Radar: RainViewer mosaic, refreshed every 5 min.</span> Overlays sit on top of the selected layer.</p>
+          </div>
         </div>
       </details>
       <details class="tool-panel" id="tiles-panel">
@@ -163,13 +177,24 @@
         </div>
       </details>
     </aside>
+    <aside id="gaia-catalog" class="gaia-catalog" aria-label="NASA GIBS layer browser">
+      <div id="catalog-resize" class="catalog-resize" role="separator" aria-orientation="vertical" aria-label="Resize layer browser (double-click to reset)" tabindex="0"></div>
+      <div class="panel-content">
+          <div class="gaia-catalog-head"><div class="eyebrow gaia-all-title">All NASA layers</div></div>
+          <label class="sr-only" for="gaia-search">Search NASA GIBS layers</label>
+          <input id="gaia-search" type="search" placeholder="Search layers (clouds, NDVI, fires…)" autocomplete="off" spellcheck="false">
+          <div id="gaia-chips" class="gaia-chips" role="group" aria-label="Layer categories"></div>
+          <div id="gaia-list" class="gaia-list" role="listbox" aria-label="NASA GIBS layers"></div>
+      </div>
+    </aside>
+    <button id="gaia-panels-toggle" class="gaia-panels-toggle" type="button" aria-pressed="false" title="Hide or show the Gaia panels"><span id="gaia-panels-toggle-text">Hide panels</span></button>
 
     <section id="spacetime" class="spacetime" aria-label="Spacetime date" hidden>
       <div class="spacetime-head">
         <div><div class="eyebrow">NASA EARTH OBSERVATION</div><strong id="spacetime-label">Earth through time</strong></div>
         <div class="timeline-actions">
           <label class="sr-only" for="spacetime-source">Daily imagery source</label>
-          <select id="spacetime-source" aria-label="Daily imagery source"><option value="modis-terra">MODIS Terra</option><option value="modis-aqua">MODIS Aqua</option><option value="viirs-snpp">VIIRS Suomi NPP</option><option value="viirs-noaa20">VIIRS NOAA-20</option></select>
+          <select id="spacetime-source" aria-label="Daily imagery source"><option value="multi-sensor">All sensors (gap-filled)</option><option value="modis-terra">MODIS Terra</option><option value="modis-aqua">MODIS Aqua</option><option value="viirs-snpp">VIIRS Suomi NPP</option><option value="viirs-noaa20">VIIRS NOAA-20</option><option value="viirs-noaa21">VIIRS NOAA-21</option><option value="sentinel2-e84">Sentinel-2 · 10 m (Earth Search)</option><option value="landsat-gls">Landsat 1972–2012 (GLS epochs)</option></select>
           <button id="spacetime-prev" type="button" aria-label="Previous day" title="Previous day">←</button>
           <button id="spacetime-next" type="button" aria-label="Next day" title="Next day">→</button>
           <form id="spacetime-form" class="date-jump"><label class="sr-only" for="spacetime-date">Choose any date</label><input id="spacetime-date" type="date"><button id="spacetime-load" type="submit">View</button></form>
@@ -177,6 +202,7 @@
         </div>
       </div>
       <div id="spacetime-loading" class="spacetime-loading" role="status" hidden>Loading NASA GIBS tiles…</div>
+      <div id="spacetime-source-status" class="spacetime-loading source-status" role="status" hidden></div>
       <div id="spacetime-days" class="spacetime-days" role="listbox" aria-label="Observation dates"></div>
     </section>
 

@@ -387,3 +387,50 @@ body.flying .explore-controls > .flight-panel { display: block; }
   .flight-readouts strong { font-size: 14px; }
   .flight-hint { display: none; }
 }
+
+.gaia-overlays { display: grid; gap: 6px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.gaia-overlays select { width: 100%; }
+.source-status { top: auto; bottom: calc(100% + 36px); }
+.gaia-featured { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.gaia-featured-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+.gaia-feature { display: flex; flex-direction: column; gap: 2px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.gaia-feature:hover, .gaia-feature[aria-selected="true"] { border-color: rgba(145, 201, 255, .6); background: rgba(145, 201, 255, .12); }
+.gaia-feature strong { font-size: 11px; font-weight: 600; }
+.gaia-feature small { color: var(--muted, #8fa0a8); font-size: 9px; line-height: 1.3; }
+.gaia-featured-list { grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); }
+.gaia-feature-meta { color: rgba(145, 201, 255, .85) !important; font-weight: 600; }
+.gaia-row small { color: rgba(145, 201, 255, .75); }
+.gaia-overlays .eyebrow, .gaia-featured .eyebrow, .gaia-all-title { margin: 0 0 2px; }
+.gaia-all-title { margin-top: 2px; }
+
+/* Gaia two-sided layout: left = start here + overlays, right = resizable catalog */
+:root { --gaia-left-width: 300px; }
+.gaia-mode .explore-controls { width: var(--gaia-left-width); }
+.gaia-featured { padding-bottom: 14px; margin-bottom: 14px; border-bottom: 2px solid var(--border-strong, var(--border)); }
+.gaia-featured-group { margin: 10px 0 4px; color: var(--text-faint); font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.gaia-featured-group:first-of-type { margin-top: 8px; }
+.gaia-overlays .eyebrow, .gaia-featured .eyebrow { color: var(--blue, #91c9ff); }
+.gaia-catalog { display: none; position: fixed; z-index: 12; top: calc(var(--topbar-height) + 14px); right: 84px; width: var(--catalog-width, 320px); max-height: calc(100dvh - var(--topbar-height) - 190px); flex-direction: column; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); box-shadow: 0 10px 28px rgba(0, 0, 0, .25); backdrop-filter: blur(18px); }
+.gaia-mode .gaia-catalog { display: flex; }
+.gaia-catalog > .panel-content { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; padding: 12px 13px 14px; }
+.gaia-catalog .gaia-list { max-height: none; min-height: 0; flex: 1 1 auto; }
+.catalog-resize { position: absolute; z-index: 2; top: 0; bottom: 0; left: -7px; width: 14px; cursor: col-resize; touch-action: none; }
+.catalog-resize::after { content: ''; position: absolute; top: 50%; left: 5px; width: 3px; height: 38px; border-radius: 2px; background: var(--border-strong); transform: translateY(-50%); transition: background .15s; }
+.catalog-resize:hover::after, .catalog-resize:focus-visible::after { background: rgba(145, 201, 255, .8); }
+.gaia-panels-toggle { display: none; position: fixed; z-index: 13; top: calc(var(--topbar-height) + 14px); left: calc(16px + var(--gaia-left-width) + 10px); padding: 6px 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text); font-size: 10px; cursor: pointer; backdrop-filter: blur(18px); }
+.gaia-panels-toggle:hover { border-color: rgba(145, 201, 255, .6); }
+.gaia-mode .gaia-panels-toggle { display: block; }
+.gaia-mode.gaia-panels-hidden .explore-controls, .gaia-mode.gaia-panels-hidden .gaia-catalog { display: none; }
+.gaia-mode.gaia-panels-hidden .gaia-panels-toggle { left: 16px; }
+.ui-minimal .gaia-catalog, .ui-minimal .gaia-panels-toggle { display: none; }
+@media (max-width: 680px) {
+  :root { --gaia-left-width: min(238px, calc(100vw - 72px)); }
+  .gaia-mode .explore-controls { max-height: 34dvh; }
+  .gaia-catalog { top: auto; right: 10px; bottom: 170px; left: 10px; width: auto; max-height: 34dvh; }
+  .catalog-resize { display: none; }
+  .gaia-panels-toggle { top: auto; bottom: 120px; left: 10px; }
+  .gaia-mode.gaia-panels-hidden .gaia-panels-toggle { left: 10px; }
+}
+#gaia-featured-list { display: block; margin-top: 0; }
+.gaia-featured-group + .gaia-featured-list { margin-top: 0; }
+.gaia-catalog input[type="search"] { width: 100%; height: 34px; padding: 0 8px; border: 1px solid var(--border); border-radius: 5px; background: #182125; color: var(--text); font-size: 11px; }

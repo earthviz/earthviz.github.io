@@ -94,8 +94,11 @@ export function parseCapabilities(xml) {
     const dim = kids(el, 'Dimension').find(d => text(d, 'Identifier').toLowerCase() === 'time');
     const periods = dim ? parsePeriods(kids(dim, 'Value').map(v => v.textContent)) : [];
     const def = dim ? Date.parse(text(dim, 'Default').length === 10 ? `${text(dim, 'Default')}T00:00:00Z` : text(dim, 'Default')) : NaN;
+    const [west, south] = text(el, 'LowerCorner').split(/\s+/).map(Number);
+    const [east, north] = text(el, 'UpperCorner').split(/\s+/).map(Number);
+    const bbox = [west, south, east, north].every(Number.isFinite) ? { west, south, east, north } : null;
     layers.push({
-      id, format, tileMatrixSet: tms,
+      id, format, tileMatrixSet: tms, bbox,
       title: kids(el, 'Title').find(t => t.parentNode === el)?.textContent.trim() || id,
       maxLevel: +tms.match(/\d+$/)[0],
       periods,
@@ -112,3 +115,62 @@ export async function fetchGibsCatalog(fetchFn = fetch, signal) {
   if (body.length > MAX_CAPABILITIES_BYTES) throw new Error('GIBS capabilities too large');
   return parseCapabilities(body);
 }
+
+// Hand-picked entry points for newcomers. Resolved against the live catalog by
+// id, so anything GIBS renames or retires quietly drops out of the list.
+export const GAIA_FEATURED = [
+  { group: 'Live & weather', id: 'IMERG_Precipitation_Rate_30min', label: 'Rain, last 30 min', hint: 'Satellite rainfall, with history' },
+  { group: 'Live & weather', id: 'GOES-East_ABI_GeoColor', label: 'Live Americas', hint: 'Geostationary true colour' },
+  { group: 'Live & weather', id: 'Himawari_AHI_Band3_Red_Visible_1km', label: 'Live Asia–Pacific', hint: 'Himawari visible clouds' },
+  { group: 'Live & weather', id: 'MODIS_Terra_Cloud_Top_Temp_Day', label: 'Storm tops', hint: 'Cloud-top temperature' },
+  { group: 'Land & fire', id: 'MODIS_Terra_Thermal_Anomalies_All', label: 'Active fires', hint: 'Wildfire hotspots' },
+  { group: 'Land & fire', id: 'MODIS_Terra_Land_Surface_Temp_Day', label: 'Land heat', hint: 'Daytime surface temperature' },
+  { group: 'Land & fire', id: 'MODIS_Terra_NDVI_8Day', label: 'Vegetation health', hint: 'Greenness index' },
+  { group: 'Land & fire', id: 'MODIS_Terra_NDSI_Snow_Cover', label: 'Snow cover', hint: 'Snow extent' },
+  { group: 'Land & fire', id: 'ASTER_GDEM_Color_Index', label: 'Elevation colours', hint: 'Colour-coded terrain height' },
+  { group: 'Ocean & ice', id: 'GHRSST_L4_MUR_Sea_Surface_Temperature', label: 'Ocean temperature', hint: 'Sea surface temperature' },
+  { group: 'Ocean & ice', id: 'MODIS_Aqua_Chlorophyll_A', label: 'Ocean life', hint: 'Chlorophyll (plankton)' },
+  { group: 'Ocean & ice', id: 'AMSR2_Sea_Ice_Concentration_12km', label: 'Sea ice', hint: 'Polar ice concentration' },
+  { group: 'Ocean & ice', id: 'AVISO_Absolute_Dynamic_Topography', label: 'Sea level', hint: 'Sea surface height, currents' },
+  { group: 'Air & climate', id: 'MODIS_Combined_Value_Added_AOD', label: 'Smoke & dust', hint: 'Aerosol optical depth' },
+  { group: 'Air & climate', id: 'MERRA2_2m_Air_Temperature_Monthly', label: 'Air temperature', hint: 'Monthly climate reanalysis' },
+  { group: 'Night & people', id: 'VIIRS_Black_Marble', label: 'Earth at night', hint: 'City lights' },
+  { group: 'Night & people', id: 'VIIRS_SNPP_DayNightBand_ENCC', label: 'Night clouds & moonlight', hint: 'Low-light imagery' },
+  { group: 'Night & people', id: 'GPW_Population_Density_2020', label: 'Population', hint: 'People per km²' },
+];
+
+export function featuredLayers(catalog, featured = GAIA_FEATURED) {
+  const byId = new Map((catalog ?? []).map(layer => [layer.id, layer]));
+  return featured.filter(f => byId.has(f.id)).map(f => ({ ...f, layer: byId.get(f.id) }));
+}
+
+// How often new observations appear (the layer's own time step), e.g. "Every 10 min".
+export function cadenceLabel(periods) {
+  const p = periods?.at(-1);
+  if (!p) return 'Static';
+  if (p.months) {
+    if (p.months === 1) return 'Monthly';
+    if (p.months === 12) return 'Yearly';
+    return `Every ${p.months} months`;
+  }
+  const minutes = Math.round(p.ms / 60000);
+  if (minutes < 60) return `Every ${minutes} min`;
+  if (minutes < 1440) return `Every ${+(minutes / 60).toFixed(1)} h`;
+  const days = Math.round(minutes / 1440);
+  if (days === 1) return 'Daily';
+  if (days === 7) return 'Weekly';
+  return `Every ${days} days`;
+}
+
+// "Global" or "Regional", from the layer's declared bounding box, with known
+// geostationary satellites named explicitly because they only see one disc.
+export function coverageLabel(layer) {
+  if (/^GOES-East/i.test(layer.id)) return 'Regional · Americas';
+  if (/^GOES-West/i.test(layer.id)) return 'Regional · Pacific';
+  if (/^Himawari/i.test(layer.id)) return 'Regional · Asia–Pacific';
+  const b = layer.bbox;
+  if (!b) return 'Coverage unknown';
+  return b.east - b.west >= 350 && b.north - b.south >= 140 ? 'Global' : 'Regional';
+}
+
+export const layerMeta = layer => `${cadenceLabel(layer.periods)} · ${coverageLabel(layer)}`;
