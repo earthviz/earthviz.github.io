@@ -15,6 +15,12 @@ import { gaiaTileUrl } from '../gibs-catalog.js';
 import { GLS_MAX_ZOOM, glsEpochForDate, glsTileUrl, titilerTileUrl } from '../sources.js';
 
 export const EXPLORE_IMAGERY = {
+  'sentinel2-live': {
+    provider: 'Element 84 / EOX',
+    maximumLevel: 14,
+    url: 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2025_3857/default/g/{z}/{y}/{x}.jpg',
+    credit: 'Sentinel-2 latest scenes by Element 84 Earth Search; EOX Sentinel-2 cloudless 2025 fallback (CC BY 4.0, contains modified Copernicus Sentinel data 2025)',
+  },
   esri: {
     provider: 'Esri',
     maximumLevel: 15,

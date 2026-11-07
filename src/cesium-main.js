@@ -674,7 +674,10 @@ function refreshImagery() {
   else if (mode === 'spacetime') {
     imagery.showSpacetime(spacetimeDate, $('spacetime-source').value);
     loadSentinelScenes();
-  } else imagery.showExplore($('src').value);
+  } else {
+    imagery.showExplore($('src').value);
+    loadSentinelScenes();
+  }
   setCredit();
 }
 
@@ -693,29 +696,39 @@ function viewDegrees() {
 function loadSentinelScenes() {
   clearTimeout(sentinelTimer);
   sentinelController?.abort();
-  const wanted = mode === 'spacetime' && GIBS_DAILY_SOURCES[$('spacetime-source').value]?.kind === 'sentinel2';
+  const exploreLive = mode === 'explore' && $('src').value === 'sentinel2-live';
+  const spacetimeLive = mode === 'spacetime' && GIBS_DAILY_SOURCES[$('spacetime-source').value]?.kind === 'sentinel2';
+  const wanted = exploreLive || spacetimeLive;
   $('spacetime-source-status').hidden = true;
   if (!wanted) return;
   sentinelTimer = setTimeout(async () => {
     const box = viewDegrees();
     const status = $('spacetime-source-status');
-    if (!box) { status.textContent = 'Zoom in to load 10 m Sentinel-2 scenes'; status.hidden = false; return; }
+    if (!box) {
+      status.textContent = exploreLive ? 'Zoom in to load latest 10 m Sentinel-2 scenes' : 'Zoom in to load 10 m Sentinel-2 scenes';
+      status.hidden = false;
+      return;
+    }
     sentinelController = new AbortController();
     const { signal } = sentinelController;
-    status.textContent = 'Searching Sentinel-2 scenes…';
+    status.textContent = 'Searching latest Sentinel-2 scenes…';
     status.hidden = false;
     try {
       const response = await privacyFetch(E84_SEARCH_URL, {
         method: 'POST', signal,
         headers: { 'Content-Type': 'application/json', Accept: 'application/geo+json' },
-        body: JSON.stringify(stacSearchBody(box, spacetimeDate)),
+        body: JSON.stringify(stacSearchBody(box, exploreLive ? previousUtcDate() : spacetimeDate)),
       });
       const result = await readJson(response, 8_000_000);
       const scenes = pickScenes(result.features);
       imagery.setSentinelScenes(scenes);
-      status.textContent = scenes.length ? `${scenes.length} Sentinel-2 scenes · newest ${scenes[0].datetime.slice(0, 10)}` : 'No Sentinel-2 scenes in the last 10 days here';
+      status.textContent = scenes.length
+        ? `${scenes.length} latest Sentinel-2 scenes · newest ${scenes[0].datetime.slice(0, 10)}`
+        : 'No recent Element 84 scenes here · showing EOX Sentinel-2 fallback';
     } catch (error) {
-      if (error.name !== 'AbortError') status.textContent = 'Sentinel-2 search unavailable right now';
+      if (error.name !== 'AbortError') status.textContent = exploreLive
+        ? 'Element 84 unavailable · showing EOX Sentinel-2 fallback'
+        : 'Sentinel-2 search unavailable right now';
     }
   }, 600);
 }
